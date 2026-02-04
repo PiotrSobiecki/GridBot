@@ -133,24 +133,33 @@ public class OrderSettingsDto {
         private BigDecimal price;
         private BigDecimal value;
 
+        // Nowe pola dla zakresów cen (minPrice <= cena < maxPrice)
+        private BigDecimal minPrice;
+        private BigDecimal maxPrice;
+
         public String getCondition() { return condition; }
         public BigDecimal getPrice() { return price; }
         public BigDecimal getValue() { return value; }
+        public BigDecimal getMinPrice() { return minPrice; }
+        public BigDecimal getMaxPrice() { return maxPrice; }
         public void setCondition(String condition) { this.condition = condition; }
         public void setPrice(BigDecimal price) { this.price = price; }
         public void setValue(BigDecimal value) { this.value = value; }
+        public void setMinPrice(BigDecimal minPrice) { this.minPrice = minPrice; }
+        public void setMaxPrice(BigDecimal maxPrice) { this.maxPrice = maxPrice; }
     }
 
     public static class SwingPercent {
-        private int minTrend;
-        private int maxTrend;
+        // Zakres cen: minPrice <= cena < maxPrice
+        private BigDecimal minPrice;
+        private BigDecimal maxPrice;
         private BigDecimal value;
 
-        public int getMinTrend() { return minTrend; }
-        public int getMaxTrend() { return maxTrend; }
+        public BigDecimal getMinPrice() { return minPrice; }
+        public BigDecimal getMaxPrice() { return maxPrice; }
         public BigDecimal getValue() { return value; }
-        public void setMinTrend(int minTrend) { this.minTrend = minTrend; }
-        public void setMaxTrend(int maxTrend) { this.maxTrend = maxTrend; }
+        public void setMinPrice(BigDecimal minPrice) { this.minPrice = minPrice; }
+        public void setMaxPrice(BigDecimal maxPrice) { this.maxPrice = maxPrice; }
         public void setValue(BigDecimal value) { this.value = value; }
     }
 }

@@ -1,21 +1,28 @@
-import { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Plus, LogOut, Settings, TrendingUp, Wallet, 
-  Activity, DollarSign, BarChart3, Zap
-} from 'lucide-react';
-import toast from 'react-hot-toast';
-import { useStore } from '../store/useStore';
-import { api } from '../api';
-import OrderTabs from './OrderTabs';
-import OrderSettings from './OrderSettings';
-import PriceDisplay from './PriceDisplay';
-import PositionsTable from './PositionsTable';
-import WalletPanel from './WalletPanel';
-import type { OrderSettings as OrderSettingsType } from '../types';
+import { useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Plus,
+  LogOut,
+  Settings,
+  TrendingUp,
+  Wallet,
+  Activity,
+  DollarSign,
+  BarChart3,
+  Zap,
+} from "lucide-react";
+import toast from "react-hot-toast";
+import { useStore } from "../store/useStore";
+import { api } from "../api";
+import OrderTabs from "./OrderTabs";
+import OrderSettings from "./OrderSettings";
+import PriceDisplay from "./PriceDisplay";
+import PositionsTable from "./PositionsTable";
+import WalletPanel from "./WalletPanel";
+import type { OrderSettings as OrderSettingsType } from "../types";
 
-const defaultOrder: Omit<OrderSettingsType, '_id'> = {
-  name: 'Nowe Zlecenie',
+const defaultOrder: Omit<OrderSettingsType, "_id"> = {
+  name: "Nowe Zlecenie",
   isActive: false,
   refreshInterval: 60,
   minProfitPercent: 0.5,
@@ -24,84 +31,88 @@ const defaultOrder: Omit<OrderSettingsType, '_id'> = {
   buyTrendCounter: 0,
   sellTrendCounter: 0,
   buy: {
-    currency: 'USDC',
+    currency: "USDC",
     walletProtection: 0,
-    mode: 'walletLimit',
+    mode: "walletLimit",
     maxValue: 0,
-    addProfit: false
+    addProfit: false,
   },
   sell: {
-    currency: 'BTC',
+    currency: "BTC",
     walletProtection: 0,
-    mode: 'walletLimit',
+    mode: "walletLimit",
     maxValue: 0,
-    addProfit: false
+    addProfit: false,
   },
   platform: {
     minTransactionValue: 10,
-    checkFeeProfit: true
+    checkFeeProfit: true,
   },
   buyConditions: {
     minValuePer1Percent: 200,
     priceThreshold: 100000,
-    checkThresholdIfProfitable: true
+    checkThresholdIfProfitable: true,
   },
   sellConditions: {
     minValuePer1Percent: 200,
     priceThreshold: 89000,
-    checkThresholdIfProfitable: true
+    checkThresholdIfProfitable: true,
   },
   trendPercents: [
     { trend: 0, buyPercent: 0.5, sellPercent: 0.5 },
     { trend: 1, buyPercent: 1, sellPercent: 1 },
     { trend: 2, buyPercent: 0.6, sellPercent: 0.3 },
     { trend: 5, buyPercent: 0.5, sellPercent: 0.5 },
-    { trend: 10, buyPercent: 0.1, sellPercent: 1 }
+    { trend: 10, buyPercent: 0.1, sellPercent: 1 },
   ],
   additionalBuyValues: [
-    { condition: 'less', price: 104000, value: 50 },
-    { condition: 'greaterEqual', price: 100000, value: 70 },
-    { condition: 'greater', price: 89000, value: 250 }
+    // zakresy: cena od ... do ... => dodatkowa wartość
+    { minPrice: 0, maxPrice: 89000, value: 250 },
+    { minPrice: 89000, maxPrice: 100000, value: 70 },
+    { minPrice: 100000, maxPrice: null, value: 50 },
   ],
   additionalSellValues: [
-    { condition: 'less', price: 104000, value: 150 },
-    { condition: 'greaterEqual', price: 100000, value: 100 },
-    { condition: 'greater', price: 89000, value: 50 }
+    { minPrice: 0, maxPrice: 89000, value: 50 },
+    { minPrice: 89000, maxPrice: 100000, value: 100 },
+    { minPrice: 100000, maxPrice: null, value: 150 },
   ],
   maxBuyPerTransaction: [
-    { condition: 'less', price: 104000, value: 500 },
-    { condition: 'greaterEqual', price: 100000, value: 700 },
-    { condition: 'greater', price: 89000, value: 2000 }
+    // zakresy: cena od ... do ... => MAX wartość transakcji
+    { minPrice: 0, maxPrice: 89000, value: 2000 },
+    { minPrice: 89000, maxPrice: 100000, value: 700 },
+    { minPrice: 100000, maxPrice: null, value: 500 },
   ],
   maxSellPerTransaction: [
-    { condition: 'less', price: 104000, value: 1500 },
-    { condition: 'greaterEqual', price: 100000, value: 1000 },
-    { condition: 'greater', price: 89000, value: 500 }
+    // zakresy: cena od ... do ... => MAX wartość transakcji
+    { minPrice: 0, maxPrice: 89000, value: 1500 },
+    { minPrice: 89000, maxPrice: 100000, value: 1000 },
+    { minPrice: 100000, maxPrice: null, value: 500 },
   ],
   buySwingPercent: [
-    { minTrend: 0, maxTrend: 1, value: 0.1 },
-    { minTrend: 1, maxTrend: 2, value: 0.2 },
-    { minTrend: 2, maxTrend: 3, value: 0.5 },
-    { minTrend: 3, maxTrend: 999, value: 1 }
+    // zakresy cen: minPrice <= cena < maxPrice => min wahanie %
+    { minPrice: 0, maxPrice: 90000, value: 0.1 },
+    { minPrice: 90000, maxPrice: 95000, value: 0.2 },
+    { minPrice: 95000, maxPrice: 100000, value: 0.5 },
+    { minPrice: 100000, maxPrice: null, value: 1 },
   ],
   sellSwingPercent: [
-    { minTrend: 0, maxTrend: 1, value: 0.1 },
-    { minTrend: 1, maxTrend: 2, value: 0.2 },
-    { minTrend: 2, maxTrend: 3, value: 0.5 },
-    { minTrend: 3, maxTrend: 999, value: 1 }
-  ]
+    { minPrice: 0, maxPrice: 90000, value: 0.1 },
+    { minPrice: 90000, maxPrice: 95000, value: 0.2 },
+    { minPrice: 95000, maxPrice: 100000, value: 0.5 },
+    { minPrice: 100000, maxPrice: null, value: 1 },
+  ],
 };
 
 export default function Dashboard() {
-  const { 
-    walletAddress, 
-    userSettings, 
-    activeOrderIndex, 
+  const {
+    walletAddress,
+    userSettings,
+    activeOrderIndex,
     setActiveOrderIndex,
     setUserSettings,
     prices,
     gridStates,
-    logout 
+    logout,
   } = useStore();
 
   const [showWallet, setShowWallet] = useState(false);
@@ -120,7 +131,7 @@ export default function Dashboard() {
           useStore.getState().updatePrice(symbol, price as number);
         });
       } catch (error) {
-        console.error('Failed to fetch prices:', error);
+        console.error("Failed to fetch prices:", error);
       }
     };
 
@@ -134,19 +145,19 @@ export default function Dashboard() {
       setIsLoading(true);
       const newOrder = await api.createOrder({
         ...defaultOrder,
-        name: `Zlecenie ${orders.length + 1}`
+        name: `Zlecenie ${orders.length + 1}`,
       });
-      
+
       if (userSettings) {
         setUserSettings({
           ...userSettings,
-          orders: [...userSettings.orders, newOrder]
+          orders: [...userSettings.orders, newOrder],
         });
         setActiveOrderIndex(orders.length);
       }
-      toast.success('Dodano nowe zlecenie');
+      toast.success("Dodano nowe zlecenie");
     } catch (error: any) {
-      toast.error(error.message || 'Błąd dodawania zlecenia');
+      toast.error(error.message || "Błąd dodawania zlecenia");
     } finally {
       setIsLoading(false);
     }
@@ -156,7 +167,7 @@ export default function Dashboard() {
     try {
       await api.logout();
       logout();
-      toast.success('Wylogowano');
+      toast.success("Wylogowano");
     } catch (error) {
       logout();
     }
@@ -190,9 +201,11 @@ export default function Dashboard() {
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-grid-card border border-grid-border hover:border-emerald-500/50 transition-colors"
               >
                 <Wallet className="w-4 h-4 text-emerald-400" />
-                <span className="font-mono text-sm">{formatAddress(walletAddress || '')}</span>
+                <span className="font-mono text-sm">
+                  {formatAddress(walletAddress || "")}
+                </span>
               </button>
-              
+
               <button
                 onClick={handleLogout}
                 className="p-2 rounded-lg hover:bg-grid-card transition-colors text-gray-400 hover:text-white"
@@ -220,7 +233,7 @@ export default function Dashboard() {
                   <Plus className="w-4 h-4" />
                 </button>
               </div>
-              
+
               <OrderTabs
                 orders={orders}
                 activeIndex={activeOrderIndex}
@@ -244,48 +257,76 @@ export default function Dashboard() {
                   <StatCard
                     icon={TrendingUp}
                     label="Trend Zakup"
-                    value={activeGridState?.buyTrendCounter ?? activeOrder.buyTrendCounter}
+                    value={
+                      activeGridState?.buyTrendCounter ??
+                      activeOrder.buyTrendCounter
+                    }
                     color="emerald"
                     subtitle="Pozycje czekające na sprzedaż"
                   />
                   <StatCard
                     icon={BarChart3}
                     label="Trend Sprzedaż"
-                    value={activeGridState?.sellTrendCounter ?? activeOrder.sellTrendCounter}
+                    value={
+                      activeGridState?.sellTrendCounter ??
+                      activeOrder.sellTrendCounter
+                    }
                     color="red"
                     subtitle="Pozycje czekające na odkup"
                   />
                   <StatCard
                     icon={DollarSign}
                     label="Cena Focus"
-                    value={`$${(activeGridState?.currentFocusPrice ?? activeOrder.focusPrice).toLocaleString()}`}
+                    value={`$${(
+                      activeGridState?.currentFocusPrice ??
+                      activeOrder.focusPrice
+                    ).toLocaleString()}`}
                     color="amber"
-                    subtitle={activeGridState?.lastKnownPrice ? `Aktualna: $${activeGridState.lastKnownPrice.toLocaleString()}` : ''}
+                    subtitle={
+                      activeGridState?.lastKnownPrice
+                        ? `Aktualna: $${activeGridState.lastKnownPrice.toLocaleString()}`
+                        : ""
+                    }
                   />
                   <StatCard
                     icon={Activity}
                     label="Całkowity Profit"
                     value={`$${(activeGridState?.totalProfit ?? 0).toFixed(2)}`}
-                    color={activeGridState?.totalProfit && activeGridState.totalProfit > 0 ? 'emerald' : 'gray'}
-                    subtitle={`${(activeGridState?.totalBuyTransactions ?? 0) + (activeGridState?.totalSellTransactions ?? 0)} transakcji`}
+                    color={
+                      activeGridState?.totalProfit &&
+                      activeGridState.totalProfit > 0
+                        ? "emerald"
+                        : "gray"
+                    }
+                    subtitle={`${
+                      (activeGridState?.totalBuyTransactions ?? 0) +
+                      (activeGridState?.totalSellTransactions ?? 0)
+                    } transakcji`}
                   />
                 </div>
-                
+
                 {/* Cele cenowe */}
                 {activeGridState && (
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-grid-card rounded-xl border border-emerald-500/30 p-4">
                       <div className="flex items-center justify-between">
                         <div>
-                          <div className="text-xs text-gray-500">Następny cel ZAKUPU</div>
+                          <div className="text-xs text-gray-500">
+                            Następny cel ZAKUPU
+                          </div>
                           <div className="text-xl font-mono font-bold text-emerald-400">
-                            ${activeGridState.nextBuyTarget?.toLocaleString() ?? '-'}
+                            $
+                            {activeGridState.nextBuyTarget?.toLocaleString() ??
+                              "-"}
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="text-xs text-gray-500">Próg cenowy</div>
+                          <div className="text-xs text-gray-500">
+                            Próg cenowy
+                          </div>
                           <div className="text-sm font-mono text-gray-400">
-                            ${activeOrder.buyConditions.priceThreshold.toLocaleString()}
+                            $
+                            {activeOrder.buyConditions.priceThreshold.toLocaleString()}
                           </div>
                         </div>
                       </div>
@@ -293,15 +334,22 @@ export default function Dashboard() {
                     <div className="bg-grid-card rounded-xl border border-red-500/30 p-4">
                       <div className="flex items-center justify-between">
                         <div>
-                          <div className="text-xs text-gray-500">Następny cel SPRZEDAŻY</div>
+                          <div className="text-xs text-gray-500">
+                            Następny cel SPRZEDAŻY
+                          </div>
                           <div className="text-xl font-mono font-bold text-red-400">
-                            ${activeGridState.nextSellTarget?.toLocaleString() ?? '-'}
+                            $
+                            {activeGridState.nextSellTarget?.toLocaleString() ??
+                              "-"}
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="text-xs text-gray-500">Próg cenowy</div>
+                          <div className="text-xs text-gray-500">
+                            Próg cenowy
+                          </div>
                           <div className="text-sm font-mono text-gray-400">
-                            ${activeOrder.sellConditions.priceThreshold.toLocaleString()}
+                            $
+                            {activeOrder.sellConditions.priceThreshold.toLocaleString()}
                           </div>
                         </div>
                       </div>
@@ -313,15 +361,14 @@ export default function Dashboard() {
 
             {/* Order Settings */}
             {activeOrder ? (
-              <OrderSettings
-                order={activeOrder}
-                gridState={activeGridState}
-              />
+              <OrderSettings order={activeOrder} gridState={activeGridState} />
             ) : (
               <div className="bg-grid-card rounded-xl border border-grid-border p-12 text-center">
                 <Settings className="w-12 h-12 mx-auto mb-4 text-gray-600" />
                 <h3 className="text-xl font-semibold mb-2">Brak zleceń</h3>
-                <p className="text-gray-500 mb-6">Dodaj pierwsze zlecenie, aby rozpocząć trading</p>
+                <p className="text-gray-500 mb-6">
+                  Dodaj pierwsze zlecenie, aby rozpocząć trading
+                </p>
                 <button
                   onClick={handleAddOrder}
                   className="px-6 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-semibold transition-colors"
@@ -333,9 +380,7 @@ export default function Dashboard() {
             )}
 
             {/* Positions Table */}
-            {activeOrder && (
-              <PositionsTable orderId={activeOrder._id || ''} />
-            )}
+            {activeOrder && <PositionsTable orderId={activeOrder._id || ""} />}
           </div>
 
           {/* Right Sidebar - Wallet */}
@@ -345,7 +390,7 @@ export default function Dashboard() {
                 <WalletPanel onClose={() => setShowWallet(false)} />
               )}
             </AnimatePresence>
-            
+
             {!showWallet && (
               <div className="bg-grid-card rounded-xl border border-grid-border p-4 sticky top-24">
                 <h3 className="font-semibold mb-4 flex items-center gap-2">
@@ -354,9 +399,14 @@ export default function Dashboard() {
                 </h3>
                 <div className="space-y-3">
                   {userSettings?.wallet.slice(0, 4).map((item) => (
-                    <div key={item.currency} className="flex justify-between items-center">
+                    <div
+                      key={item.currency}
+                      className="flex justify-between items-center"
+                    >
                       <span className="text-gray-400">{item.currency}</span>
-                      <span className="font-mono">{item.balance.toLocaleString()}</span>
+                      <span className="font-mono">
+                        {item.balance.toLocaleString()}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -375,25 +425,25 @@ export default function Dashboard() {
   );
 }
 
-function StatCard({ 
-  icon: Icon, 
-  label, 
-  value, 
+function StatCard({
+  icon: Icon,
+  label,
+  value,
   color,
-  subtitle
-}: { 
-  icon: any; 
-  label: string; 
-  value: string | number; 
+  subtitle,
+}: {
+  icon: any;
+  label: string;
+  value: string | number;
   color: string;
   subtitle?: string;
 }) {
   const colorClasses: Record<string, string> = {
-    emerald: 'text-emerald-400 bg-emerald-500/10',
-    blue: 'text-blue-400 bg-blue-500/10',
-    amber: 'text-amber-400 bg-amber-500/10',
-    red: 'text-red-400 bg-red-500/10',
-    gray: 'text-gray-400 bg-gray-500/10'
+    emerald: "text-emerald-400 bg-emerald-500/10",
+    blue: "text-blue-400 bg-blue-500/10",
+    amber: "text-amber-400 bg-amber-500/10",
+    red: "text-red-400 bg-red-500/10",
+    gray: "text-gray-400 bg-gray-500/10",
   };
 
   return (
@@ -405,7 +455,9 @@ function StatCard({
         <div className="flex-1">
           <div className="text-xs text-gray-500">{label}</div>
           <div className="font-mono font-semibold">{value}</div>
-          {subtitle && <div className="text-xs text-gray-600 mt-0.5">{subtitle}</div>}
+          {subtitle && (
+            <div className="text-xs text-gray-600 mt-0.5">{subtitle}</div>
+          )}
         </div>
       </div>
     </div>

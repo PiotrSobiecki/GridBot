@@ -223,7 +223,7 @@ public class GridAlgorithmService {
         return totalFee.compareTo(expectedProfit) < 0;
     }
     
-    private BigDecimal getSwingPercent(int trend, OrderSettingsDto settings, boolean isBuy) {
+    private BigDecimal getSwingPercent(BigDecimal currentPrice, OrderSettingsDto settings, boolean isBuy) {
         List<SwingPercent> swingPercents = isBuy 
                 ? settings.getBuySwingPercent() 
                 : settings.getSellSwingPercent();
@@ -233,9 +233,14 @@ public class GridAlgorithmService {
         }
         
         for (SwingPercent sp : swingPercents) {
-            if (trend >= sp.getMinTrend() && trend <= sp.getMaxTrend()) {
-                return sp.getValue();
+            // Sprawdź zakres cen: minPrice <= cena < maxPrice
+            if (sp.getMinPrice() != null && currentPrice.compareTo(sp.getMinPrice()) < 0) {
+                continue;
             }
+            if (sp.getMaxPrice() != null && currentPrice.compareTo(sp.getMaxPrice()) >= 0) {
+                continue;
+            }
+            return sp.getValue() != null ? sp.getValue() : BigDecimal.ZERO;
         }
         
         return BigDecimal.ZERO;
@@ -243,7 +248,7 @@ public class GridAlgorithmService {
     
     private boolean meetsMinSwing(BigDecimal previousPrice, BigDecimal currentPrice, int trend, 
                                    OrderSettingsDto settings, boolean isBuy) {
-        BigDecimal minSwingPercent = getSwingPercent(trend, settings, isBuy);
+        BigDecimal minSwingPercent = getSwingPercent(currentPrice, settings, isBuy);
         
         if (minSwingPercent.compareTo(BigDecimal.ZERO) == 0) {
             return true;
@@ -619,6 +624,20 @@ public class GridAlgorithmService {
     }
     
     private boolean matchesThreshold(BigDecimal price, PriceThreshold threshold) {
+        if (threshold == null) return false;
+
+        // Nowy tryb: zakres cen w jednej linii (minPrice <= price < maxPrice)
+        if (threshold.getMinPrice() != null || threshold.getMaxPrice() != null) {
+            if (threshold.getMinPrice() != null && price.compareTo(threshold.getMinPrice()) < 0) {
+                return false;
+            }
+            if (threshold.getMaxPrice() != null && price.compareTo(threshold.getMaxPrice()) >= 0) {
+                return false;
+            }
+            return true;
+        }
+
+        // Stary tryb: pojedynczy warunek względem price/condition
         if (threshold.getPrice() == null || threshold.getCondition() == null) return false;
         
         BigDecimal thresholdPrice = threshold.getPrice();

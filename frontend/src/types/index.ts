@@ -5,8 +5,21 @@ export interface WalletBalance {
 }
 
 export interface PriceThreshold {
-  condition: 'less' | 'lessEqual' | 'greater' | 'greaterEqual';
-  price: number;
+  /**
+   * Stare podejście – pojedynczy warunek względem jednej ceny.
+   * Używane dalej dla: additionalBuyValues / additionalSellValues.
+   */
+  condition?: "less" | "lessEqual" | "greater" | "greaterEqual";
+  price?: number;
+
+  /**
+   * Nowe podejście – zakres cen w jednej linii:
+   * minPrice <= cena < maxPrice (jeśli wartości ustawione).
+   * Używane dla: maxBuyPerTransaction / maxSellPerTransaction.
+   */
+  minPrice?: number | null;
+  maxPrice?: number | null;
+
   value: number;
 }
 
@@ -17,15 +30,16 @@ export interface TrendPercent {
 }
 
 export interface SwingPercent {
-  minTrend: number;
-  maxTrend: number;
+  // Zakres cen: minPrice <= cena < maxPrice
+  minPrice?: number | null;
+  maxPrice?: number | null;
   value: number;
 }
 
 export interface BuySellSettings {
   currency: string;
   walletProtection: number;
-  mode: 'onlySold' | 'onlyBought' | 'maxDefined' | 'walletLimit';
+  mode: "onlySold" | "onlyBought" | "maxDefined" | "walletLimit";
   maxValue: number;
   addProfit: boolean;
 }
@@ -45,7 +59,7 @@ export interface OrderSettings {
   _id?: string;
   name: string;
   isActive: boolean;
-  
+
   // 1# Ogólne ustawienia
   refreshInterval: number;
   minProfitPercent: number;
@@ -53,29 +67,29 @@ export interface OrderSettings {
   timeToNewFocus: number;
   buyTrendCounter: number;
   sellTrendCounter: number;
-  
+
   // 2# Wymagania KUPNO/SPRZEDAŻ
   buy: BuySellSettings;
   sell: BuySellSettings;
-  
+
   // 3# Wymagania Platformy
   platform: PlatformSettings;
-  
+
   // 4# Warunek kolejnych transakcji
   buyConditions: TransactionConditions;
   sellConditions: TransactionConditions;
-  
+
   // 5# Procent do nowej transakcji
   trendPercents: TrendPercent[];
-  
+
   // 6# Dodatkowa wartość kupna/sprzedaży
   additionalBuyValues: PriceThreshold[];
   additionalSellValues: PriceThreshold[];
-  
+
   // 7# MAX SPRZEDAŻ/KUPNO poj. transakcji
   maxBuyPerTransaction: PriceThreshold[];
   maxSellPerTransaction: PriceThreshold[];
-  
+
   // 8# Procent wahania
   buySwingPercent: SwingPercent[];
   sellSwingPercent: SwingPercent[];
@@ -85,7 +99,7 @@ export interface Position {
   id: string;
   walletAddress: string;
   orderId: string;
-  type: 'BUY' | 'SELL';
+  type: "BUY" | "SELL";
   buyPrice: number;
   buyValue: number;
   sellPrice: number;
@@ -94,7 +108,7 @@ export interface Position {
   trendAtBuy: number;
   targetSellPrice: number;
   targetBuybackPrice: number;
-  status: 'OPEN' | 'CLOSED' | 'CANCELLED';
+  status: "OPEN" | "CLOSED" | "CANCELLED";
   profit?: number;
   createdAt: string;
   closedAt?: string;
@@ -126,7 +140,7 @@ export interface GridState {
 
 export interface Transaction {
   orderId: string;
-  type: 'buy' | 'sell';
+  type: "buy" | "sell";
   currency: string;
   amount: number;
   price: number;
