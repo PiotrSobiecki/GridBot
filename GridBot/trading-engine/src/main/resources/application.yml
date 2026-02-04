@@ -1,0 +1,55 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: jdbc:h2:mem:gridbot;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driverClassName: org.h2.Driver
+    username: sa
+    password:
+    
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+      
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+gridbot:
+  jwt:
+    secret: ${JWT_SECRET:gridbot-secret-key}
+  
+  auth-service:
+    url: ${AUTH_SERVICE_URL:http://localhost:3001}
+  
+  trading:
+    simulation-mode: true
+    
+    price-feed:
+      url: wss://stream.binance.com:9443/ws
+      symbols:
+        - btcusdt
+        - ethusdt
+        - dogeusdt
+        - solusdt
+
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+
+  datasource:
+    url: jdbc:h2:file:/data/gridbot;DB_CLOSE_DELAY=-1
+
+gridbot:
+  auth-service:
+    url: http://auth-service:3001
