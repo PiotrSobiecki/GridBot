@@ -313,7 +313,8 @@ public class GridAlgorithmService {
             return;
         }
         
-        String buyCurrency = settings.getBuy() != null ? settings.getBuy().getCurrency() : "USDC";
+        // Na spocie jako stable używamy USDT
+        String buyCurrency = settings.getBuy() != null ? settings.getBuy().getCurrency() : "USDT";
         String sellCurrency = settings.getSell() != null ? settings.getSell().getCurrency() : "BTC";
         
         boolean success = walletService.executeBuy(state.getWalletAddress(), buyCurrency, sellCurrency, transactionValue, amount);
@@ -352,13 +353,29 @@ public class GridAlgorithmService {
         log.info("BUY executed: price={}, amount={}, value={}, trend={}", currentPrice, amount, transactionValue, currentTrend);
     }
     
+    /**
+     * Zamyka pozycje kupna (sprzedaż z zyskiem), z uwzględnieniem progu cenowego sprzedaży.
+     */
     private void checkAndExecuteBuySells(BigDecimal currentPrice, GridState state, OrderSettingsDto settings) {
         List<String> positionIds = parseIdList(state.getOpenPositionIds());
         if (positionIds.isEmpty()) return;
-        
+
+        var sellConditions = settings.getSellConditions();
+        if (sellConditions != null) {
+            BigDecimal priceThreshold = sellConditions.getPriceThreshold();
+            if (priceThreshold != null && currentPrice.compareTo(priceThreshold) < 0) {
+                if (sellConditions.isCheckThresholdIfProfitable()) {
+                    return;
+                }
+                if (state.getTotalProfit().compareTo(BigDecimal.ZERO) <= 0) {
+                    return;
+                }
+            }
+        }
+
         List<Position> positions = positionRepository.findByIdIn(positionIds);
         positions.sort(Comparator.comparing(Position::getTargetSellPrice));
-        
+
         for (Position position : positions) {
             if (position.getStatus() != Position.PositionStatus.OPEN) continue;
             if (position.getTargetSellPrice() != null && currentPrice.compareTo(position.getTargetSellPrice()) >= 0) {
@@ -376,7 +393,7 @@ public class GridAlgorithmService {
         }
         
         String sellCurrency = settings.getSell() != null ? settings.getSell().getCurrency() : "BTC";
-        String buyCurrency = settings.getBuy() != null ? settings.getBuy().getCurrency() : "USDC";
+        String buyCurrency = settings.getBuy() != null ? settings.getBuy().getCurrency() : "USDT";
         
         boolean success = walletService.executeSell(state.getWalletAddress(), sellCurrency, buyCurrency, position.getAmount(), sellValue);
         
@@ -457,7 +474,7 @@ public class GridAlgorithmService {
         }
         
         String sellCurrency = settings.getSell() != null ? settings.getSell().getCurrency() : "BTC";
-        String buyCurrency = settings.getBuy() != null ? settings.getBuy().getCurrency() : "USDC";
+        String buyCurrency = settings.getBuy() != null ? settings.getBuy().getCurrency() : "USDT";
         
         boolean success = walletService.executeSell(state.getWalletAddress(), sellCurrency, buyCurrency, amount, transactionValue);
         
@@ -489,7 +506,7 @@ public class GridAlgorithmService {
         state.setFocusLastUpdated(Instant.now());
         state.setNextSellTarget(calculateNextSellTarget(currentPrice, state.getSellTrendCounter(), settings));
         
-        log.info("SELL SHORT executed: price={}, amount={}", currentPrice, amount);
+        log.info("SELL executed: price={}, amount={}", currentPrice, amount);
     }
     
     private void checkAndExecuteSellBuybacks(BigDecimal currentPrice, GridState state, OrderSettingsDto settings) {
@@ -514,7 +531,7 @@ public class GridAlgorithmService {
             return;
         }
         
-        String buyCurrency = settings.getBuy() != null ? settings.getBuy().getCurrency() : "USDC";
+        String buyCurrency = settings.getBuy() != null ? settings.getBuy().getCurrency() : "USDT";
         String sellCurrency = settings.getSell() != null ? settings.getSell().getCurrency() : "BTC";
         
         boolean success = walletService.executeBuy(state.getWalletAddress(), buyCurrency, sellCurrency, buybackValue, position.getAmount());
@@ -563,6 +580,13 @@ public class GridAlgorithmService {
         List<TrendPercent> trendPercents = settings.getTrendPercents();
         
         if (trendPercents == null || trendPercents.isEmpty()) {
+            // Brak zdefiniowanych trendów:
+            // użyj globalnego minProfitPercent jako domyślnego kroku (BUY/SELL),
+            // a jeśli go nie ma – wróć do 0.5% jak wcześniej.
+            BigDecimal minProfit = settings.getMinProfitPercent();
+            if (minProfit != null) {
+                return minProfit;
+            }
             return BigDecimal.valueOf(0.5);
         }
         
@@ -572,7 +596,13 @@ public class GridAlgorithmService {
                 .orElse(trendPercents.get(0));
         
         BigDecimal percent = isBuy ? result.getBuyPercent() : result.getSellPercent();
-        return percent != null ? percent : BigDecimal.valueOf(0.5);
+        // Jeśli w trendzie nie ustawiono konkretnego procentu,
+        // też użyj minProfitPercent jako sensownego defaultu.
+        if (percent != null) {
+            return percent;
+        }
+        BigDecimal minProfit = settings.getMinProfitPercent();
+        return minProfit != null ? minProfit : BigDecimal.valueOf(0.5);
     }
     
     private BigDecimal calculateTransactionValue(BigDecimal currentPrice, int trend, 

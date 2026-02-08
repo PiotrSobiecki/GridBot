@@ -5,3 +5,4 @@ export { default as OrderSettings } from './OrderSettings';
 export { default as PriceDisplay } from './PriceDisplay';
 export { default as PositionsTable } from './PositionsTable';
 export { default as WalletPanel } from './WalletPanel';
+export { default as SettingsApiPanel } from './SettingsApiPanel';

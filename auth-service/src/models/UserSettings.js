@@ -31,7 +31,7 @@ const orderSchema = new mongoose.Schema(
     isActive: { type: Boolean, default: false },
 
     // 1# Ogólne ustawienia
-    refreshInterval: { type: Number, default: 60 }, // sekundy
+    refreshInterval: { type: Number, default: 5 }, // sekundy (odświeżanie + sprawdzanie cen / wykonywanie)
     minProfitPercent: { type: Number, default: 0.5 },
     focusPrice: { type: Number, default: 0 },
     timeToNewFocus: { type: Number, default: 0 }, // sekundy, 0 = wyłączone
@@ -40,7 +40,8 @@ const orderSchema = new mongoose.Schema(
 
     // 2# Wymagania KUPNO
     buy: {
-      currency: { type: String, default: "USDC" },
+      // Na spocie jako stable używamy USDT
+      currency: { type: String, default: "USDT" },
       walletProtection: { type: Number, default: 0 },
       mode: {
         type: String,
@@ -66,7 +67,7 @@ const orderSchema = new mongoose.Schema(
 
     // 3# Wymagania Platformy
     platform: {
-      minTransactionValue: { type: Number, default: 10 },
+      minTransactionValue: { type: Number, default: 0 },
       checkFeeProfit: { type: Boolean, default: true },
     },
 
@@ -178,7 +179,8 @@ const userSettingsSchema = new mongoose.Schema({
       },
     ],
     default: [
-      { currency: "USDC", balance: 10000, reserved: 0 },
+      // Stable w symulacji: USDT
+      { currency: "USDT", balance: 10000, reserved: 0 },
       { currency: "BTC", balance: 1, reserved: 0 },
       { currency: "DOGE", balance: 1000, reserved: 0 },
       { currency: "ETH", balance: 0, reserved: 0 },

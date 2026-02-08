@@ -13,6 +13,8 @@ public class OrderSettingsDto {
     private int timeToNewFocus;
     private int buyTrendCounter;
     private int sellTrendCounter;
+    private String baseAsset;
+    private String quoteAsset;
     private BuySellSettings buy;
     private BuySellSettings sell;
     private PlatformSettings platform;
@@ -36,6 +38,8 @@ public class OrderSettingsDto {
     public int getTimeToNewFocus() { return timeToNewFocus; }
     public int getBuyTrendCounter() { return buyTrendCounter; }
     public int getSellTrendCounter() { return sellTrendCounter; }
+    public String getBaseAsset() { return baseAsset; }
+    public String getQuoteAsset() { return quoteAsset; }
     public BuySellSettings getBuy() { return buy; }
     public BuySellSettings getSell() { return sell; }
     public PlatformSettings getPlatform() { return platform; }
@@ -59,6 +63,8 @@ public class OrderSettingsDto {
     public void setTimeToNewFocus(int timeToNewFocus) { this.timeToNewFocus = timeToNewFocus; }
     public void setBuyTrendCounter(int buyTrendCounter) { this.buyTrendCounter = buyTrendCounter; }
     public void setSellTrendCounter(int sellTrendCounter) { this.sellTrendCounter = sellTrendCounter; }
+    public void setBaseAsset(String baseAsset) { this.baseAsset = baseAsset; }
+    public void setQuoteAsset(String quoteAsset) { this.quoteAsset = quoteAsset; }
     public void setBuy(BuySellSettings buy) { this.buy = buy; }
     public void setSell(BuySellSettings sell) { this.sell = sell; }
     public void setPlatform(PlatformSettings platform) { this.platform = platform; }

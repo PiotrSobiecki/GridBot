@@ -3,6 +3,9 @@ import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
 // Use SQLite model instead of MongoDB
 import UserSettings from "../trading/models/UserSettings.js";
+import GridState from "../trading/models/GridState.js";
+import * as GridAlgorithmService from "../trading/services/GridAlgorithmService.js";
+import { encrypt, decrypt } from "../trading/services/CryptoService.js";
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "gridbot-secret-key";
@@ -51,6 +54,75 @@ router.get("/", authMiddleware, (req, res) => {
   } catch (error) {
     console.error("Get settings error:", error);
     res.status(500).json({ error: "Failed to get settings" });
+  }
+});
+
+// ================== Ustawienia API / konta giełdowego ==================
+
+/**
+ * GET /settings/api
+ * Zwraca metadane API (bez kluczy) dla zalogowanego portfela.
+ */
+router.get("/api", authMiddleware, (req, res) => {
+  try {
+    const settings = UserSettings.findOne({ walletAddress: req.walletAddress });
+    const apiConfig = settings?.apiConfig || {};
+    const aster = apiConfig.aster || {};
+
+    res.json({
+      aster: {
+        name: aster.name || "",
+        avatar: aster.avatar || "",
+        hasKeys: !!(aster.apiKeyEncrypted && aster.apiSecretEncrypted),
+      },
+    });
+  } catch (error) {
+    console.error("Get API settings error:", error);
+    res.status(500).json({ error: "Failed to load API settings" });
+  }
+});
+
+/**
+ * POST /settings/api/aster
+ * Zapisuje zaszyfrowane klucze API + metadane konta Aster dla zalogowanego portfela.
+ */
+router.post("/api/aster", authMiddleware, (req, res) => {
+  try {
+    const { name, avatar, apiKey, apiSecret } = req.body || {};
+
+    let settings = UserSettings.findOne({ walletAddress: req.walletAddress });
+
+    if (!settings) {
+      settings = new UserSettings({ walletAddress: req.walletAddress });
+    }
+
+    const cfg = settings.apiConfig || {};
+    const aster = cfg.aster || {};
+
+    if (typeof name === "string") aster.name = name;
+    if (typeof avatar === "string") aster.avatar = avatar;
+
+    if (typeof apiKey === "string" && apiKey.trim()) {
+      aster.apiKeyEncrypted = encrypt(apiKey.trim());
+    }
+    if (typeof apiSecret === "string" && apiSecret.trim()) {
+      aster.apiSecretEncrypted = encrypt(apiSecret.trim());
+    }
+
+    cfg.aster = aster;
+    settings.apiConfig = cfg;
+    settings.save();
+
+    res.json({
+      aster: {
+        name: aster.name || "",
+        avatar: aster.avatar || "",
+        hasKeys: !!(aster.apiKeyEncrypted && aster.apiSecretEncrypted),
+      },
+    });
+  } catch (error) {
+    console.error("Save API settings error:", error);
+    res.status(500).json({ error: "Failed to save API settings" });
   }
 });
 
@@ -135,16 +207,50 @@ router.put("/orders/:orderId", authMiddleware, (req, res) => {
     }
 
     // Merge update data with existing order
-    settings.orders[orderIndex] = {
+    const updatedOrder = {
       ...settings.orders[orderIndex],
       ...updateData,
       id: orderId,
       _id: orderId,
     };
 
+    settings.orders[orderIndex] = updatedOrder;
+
     settings.save();
 
-    res.json(settings.orders[orderIndex]);
+    // Jeśli zmieniły się kluczowe parametry (np. focusPrice),
+    // zaktualizuj także istniejący GridState, żeby wartości u góry
+    // (focus, następny zakup/sprzedaż) od razu się zgadzały.
+    try {
+      const lowerWallet = req.walletAddress.toLowerCase();
+      const state = GridState.findByWalletAndOrderId(lowerWallet, orderId);
+      if (state && typeof updatedOrder.focusPrice === "number") {
+        const focusPrice = updatedOrder.focusPrice || 0;
+        state.currentFocusPrice = focusPrice;
+        state.focusLastUpdated = new Date().toISOString();
+        state.nextBuyTarget = GridAlgorithmService.calculateNextBuyTarget(
+          focusPrice,
+          state.buyTrendCounter || 0,
+          updatedOrder
+        ).toNumber();
+        state.nextSellTarget = GridAlgorithmService.calculateNextSellTarget(
+          focusPrice,
+          state.buyTrendCounter || 0,
+          updatedOrder
+        ).toNumber();
+        state.save();
+        console.log(
+          `🔄 Synced GridState with new focusPrice for wallet=${lowerWallet}, orderId=${orderId}`
+        );
+      }
+    } catch (syncError) {
+      console.error(
+        "⚠️ Failed to sync GridState after order update:",
+        syncError.message
+      );
+    }
+
+    res.json(updatedOrder);
   } catch (error) {
     console.error("Update order error:", error);
     res.status(500).json({ error: "Failed to update order" });
@@ -166,6 +272,37 @@ router.delete("/orders/:orderId", authMiddleware, (req, res) => {
       (o) => (o.id || o._id) !== orderId
     );
     settings.save();
+
+    // Dodatkowo wyczyść stan GRID + pozycje w SQLite,
+    // żeby scheduler nie próbował dalej przetwarzać tego zlecenia.
+    (async () => {
+      try {
+        const lowerWallet = req.walletAddress.toLowerCase();
+        const state = GridState.findByWalletAndOrderId(lowerWallet, orderId);
+
+        if (state) {
+          const dbModule = await import("../trading/db.js");
+          const db = dbModule.default;
+
+          db.prepare(
+            "DELETE FROM grid_states WHERE wallet_address = ? AND order_id = ?"
+          ).run(lowerWallet, orderId);
+
+          db.prepare(
+            "DELETE FROM positions WHERE wallet_address = ? AND order_id = ?"
+          ).run(lowerWallet, orderId);
+
+          console.log(
+            `🧹 Deleted GRID state and positions for wallet=${lowerWallet}, orderId=${orderId}`
+          );
+        }
+      } catch (cleanupError) {
+        console.error(
+          "⚠️ Failed to cleanup GRID state/positions after order delete:",
+          cleanupError.message
+        );
+      }
+    })();
 
     res.json({ success: true });
   } catch (error) {

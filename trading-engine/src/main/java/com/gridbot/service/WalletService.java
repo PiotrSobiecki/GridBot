@@ -21,9 +21,8 @@ public class WalletService {
     // Symulowane salda portfeli: walletAddress -> currency -> balance
     private final Map<String, Map<String, BigDecimal>> walletBalances = new ConcurrentHashMap<>();
     
-    // Domyślne salda dla nowych portfeli
+    // Domyślne salda dla nowych portfeli (stable: USDT)
     private static final Map<String, BigDecimal> DEFAULT_BALANCES = Map.of(
-            "USDC", new BigDecimal("10000"),
             "USDT", new BigDecimal("10000"),
             "BTC", new BigDecimal("1"),
             "ETH", new BigDecimal("10"),

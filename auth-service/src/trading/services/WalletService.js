@@ -151,9 +151,9 @@ export function reserveFunds(walletAddress, currency, amount) {
 }
 
 /**
- * Synchronizuje salda z zewnętrznego źródła (np. API giełdy)
+ * Synchronizuje salda z zewnętrznego źródła (np. API giełdy) i zapisuje do bazy
  */
-export function syncBalances(walletAddress, externalBalances) {
+export async function syncBalances(walletAddress, externalBalances) {
   const wallet = walletAddress.toLowerCase();
   const balances = new Map();
   
@@ -163,6 +163,29 @@ export function syncBalances(walletAddress, externalBalances) {
   
   walletBalances.set(wallet, balances);
   console.log(`✅ Synced balances for ${walletAddress}:`, externalBalances);
+
+  // Zapisz do bazy danych (UserSettings) - dynamiczny import żeby uniknąć circular dependency
+  try {
+    const { default: UserSettings } = await import("../models/UserSettings.js");
+    let settings = UserSettings.findOne({ walletAddress: wallet });
+    
+    if (!settings) {
+      settings = new UserSettings({ walletAddress: wallet });
+    }
+
+    // Konwertuj z formatu {CURRENCY: "balance"} na [{currency, balance, reserved}]
+    const walletArray = Object.entries(externalBalances).map(([currency, balance]) => ({
+      currency: currency.toUpperCase(),
+      balance: parseFloat(balance) || 0,
+      reserved: 0,
+    }));
+
+    settings.wallet = walletArray;
+    settings.save();
+    console.log(`💾 Saved wallet to database for ${walletAddress}`);
+  } catch (error) {
+    console.error(`❌ Failed to save wallet to database:`, error.message);
+  }
 }
 
 export default {

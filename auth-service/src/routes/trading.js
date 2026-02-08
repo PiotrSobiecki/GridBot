@@ -1,31 +1,42 @@
-import express from 'express';
-import Decimal from 'decimal.js';
-import * as GridAlgorithmService from '../trading/services/GridAlgorithmService.js';
-import * as PriceFeedService from '../trading/services/PriceFeedService.js';
-import * as WalletService from '../trading/services/WalletService.js';
-import * as GridSchedulerService from '../trading/services/GridSchedulerService.js';
-import UserSettings from '../models/UserSettings.js';
+import express from "express";
+import Decimal from "decimal.js";
+import * as GridAlgorithmService from "../trading/services/GridAlgorithmService.js";
+import * as PriceFeedService from "../trading/services/PriceFeedService.js";
+import * as WalletService from "../trading/services/WalletService.js";
+import * as GridSchedulerService from "../trading/services/GridSchedulerService.js";
+import * as AsterSpotService from "../trading/services/AsterSpotService.js";
+import UserSettings from "../models/UserSettings.js";
 
 const router = express.Router();
+
+// Prosty cache na symbole Aster (żeby nie pytać API przy każdym żądaniu)
+let cachedAsterSymbols = null;
+let cachedAsterSymbolsAt = 0;
+const ASTER_SYMBOLS_TTL_MS = 10 * 60 * 1000; // 10 minut
 
 /**
  * Inicjalizuje algorytm GRID dla zlecenia
  */
-router.post('/grid/init', async (req, res) => {
+router.post("/grid/init", async (req, res) => {
   try {
-    const walletAddress = req.headers['x-wallet-address'];
+    const walletAddress = req.headers["x-wallet-address"];
     const settings = req.body;
-    
+
     if (!walletAddress) {
-      return res.status(400).json({ error: 'Missing X-Wallet-Address header' });
+      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
     }
-    
-    console.log(`🚀 Initializing GRID for wallet ${walletAddress} with order ${settings.id}`);
-    
-    const state = GridAlgorithmService.initializeGridState(walletAddress, settings);
+
+    console.log(
+      `🚀 Initializing GRID for wallet ${walletAddress} with order ${settings.id}`
+    );
+
+    const state = GridAlgorithmService.initializeGridState(
+      walletAddress,
+      settings
+    );
     res.json(state.toJSON());
   } catch (error) {
-    console.error('Error initializing grid:', error);
+    console.error("Error initializing grid:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -33,24 +44,24 @@ router.post('/grid/init', async (req, res) => {
 /**
  * Pobiera stan algorytmu GRID
  */
-router.get('/grid/state/:orderId', (req, res) => {
+router.get("/grid/state/:orderId", (req, res) => {
   try {
-    const walletAddress = req.headers['x-wallet-address'];
+    const walletAddress = req.headers["x-wallet-address"];
     const { orderId } = req.params;
-    
+
     if (!walletAddress) {
-      return res.status(400).json({ error: 'Missing X-Wallet-Address header' });
+      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
     }
-    
+
     const state = GridAlgorithmService.getGridState(walletAddress, orderId);
-    
+
     if (!state) {
-      return res.status(404).json({ error: 'Grid state not found' });
+      return res.status(404).json({ error: "Grid state not found" });
     }
-    
+
     res.json(state.toJSON());
   } catch (error) {
-    console.error('Error getting grid state:', error);
+    console.error("Error getting grid state:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -58,20 +69,20 @@ router.get('/grid/state/:orderId', (req, res) => {
 /**
  * Pobiera wszystkie stany GRID dla portfela
  */
-router.get('/grid/states', (req, res) => {
+router.get("/grid/states", (req, res) => {
   try {
-    const walletAddress = req.headers['x-wallet-address'];
-    
+    const walletAddress = req.headers["x-wallet-address"];
+
     if (!walletAddress) {
-      return res.status(400).json({ error: 'Missing X-Wallet-Address header' });
+      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
     }
-    
-    const { GridState } = require('../trading/models/GridState.js');
+
+    const { GridState } = require("../trading/models/GridState.js");
     const states = GridState.findAllByWallet(walletAddress);
-    
-    res.json(states.map(s => s.toJSON()));
+
+    res.json(states.map((s) => s.toJSON()));
   } catch (error) {
-    console.error('Error getting grid states:', error);
+    console.error("Error getting grid states:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -79,20 +90,22 @@ router.get('/grid/states', (req, res) => {
 /**
  * Uruchamia algorytm GRID
  */
-router.post('/grid/start/:orderId', (req, res) => {
+router.post("/grid/start/:orderId", (req, res) => {
   try {
-    const walletAddress = req.headers['x-wallet-address'];
+    const walletAddress = req.headers["x-wallet-address"];
     const { orderId } = req.params;
-    
+
     if (!walletAddress) {
-      return res.status(400).json({ error: 'Missing X-Wallet-Address header' });
+      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
     }
-    
-    console.log(`▶️ Starting GRID for wallet ${walletAddress} order ${orderId}`);
+
+    console.log(
+      `▶️ Starting GRID for wallet ${walletAddress} order ${orderId}`
+    );
     GridAlgorithmService.startGrid(walletAddress, orderId);
     res.json({ success: true });
   } catch (error) {
-    console.error('Error starting grid:', error);
+    console.error("Error starting grid:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -100,40 +113,56 @@ router.post('/grid/start/:orderId', (req, res) => {
 /**
  * Zatrzymuje algorytm GRID
  */
-router.post('/grid/stop/:orderId', (req, res) => {
+router.post("/grid/stop/:orderId", (req, res) => {
   try {
-    const walletAddress = req.headers['x-wallet-address'];
+    const walletAddress = req.headers["x-wallet-address"];
     const { orderId } = req.params;
-    
+
     if (!walletAddress) {
-      return res.status(400).json({ error: 'Missing X-Wallet-Address header' });
+      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
     }
-    
-    console.log(`⏹️ Stopping GRID for wallet ${walletAddress} order ${orderId}`);
+
+    console.log(
+      `⏹️ Stopping GRID for wallet ${walletAddress} order ${orderId}`
+    );
     GridAlgorithmService.stopGrid(walletAddress, orderId);
     res.json({ success: true });
   } catch (error) {
-    console.error('Error stopping grid:', error);
+    console.error("Error stopping grid:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
 /**
- * Pobiera otwarte pozycje dla zlecenia
+ * Pobiera wszystkie pozycje (OPEN i CLOSED) dla zlecenia - do wyświetlania historii
  */
-router.get('/positions/:orderId', (req, res) => {
+router.get("/positions/:orderId", (req, res) => {
   try {
-    const walletAddress = req.headers['x-wallet-address'];
+    const walletAddress = req.headers["x-wallet-address"];
     const { orderId } = req.params;
-    
+
     if (!walletAddress) {
-      return res.status(400).json({ error: 'Missing X-Wallet-Address header' });
+      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
     }
-    
-    const positions = GridAlgorithmService.getOpenPositions(walletAddress, orderId);
-    res.json(positions.map(p => p.toJSON()));
+
+    // Zwróć wszystkie pozycje (OPEN i CLOSED) dla historii
+    const positions = GridAlgorithmService.getAllPositions(
+      walletAddress,
+      orderId
+    );
+
+    // Logowanie dla debugowania
+    const buyCount = positions.filter(
+      (p) => p.type === "BUY" || !p.type
+    ).length;
+    const sellCount = positions.filter((p) => p.type === "SELL").length;
+    console.log(
+      `📊 Positions API: wallet=${walletAddress}, orderId=${orderId}, total=${positions.length}, BUY=${buyCount}, SELL=${sellCount}`
+    );
+
+    res.json(positions.map((p) => p.toJSON()));
   } catch (error) {
-    console.error('Error getting positions:', error);
+    console.error("Error getting positions:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -141,23 +170,23 @@ router.get('/positions/:orderId', (req, res) => {
 /**
  * Oblicza następny cel zakupu (preview)
  */
-router.post('/grid/calculate-buy-target', (req, res) => {
+router.post("/grid/calculate-buy-target", (req, res) => {
   try {
     const { focusPrice, trend } = req.query;
     const settings = req.body;
-    
+
     const fp = new Decimal(focusPrice);
     const t = parseInt(trend);
-    
+
     const target = GridAlgorithmService.calculateNextBuyTarget(fp, t, settings);
-    
+
     res.json({
       focusPrice: fp.toString(),
       trend: t,
-      targetPrice: target.toString()
+      targetPrice: target.toString(),
     });
   } catch (error) {
-    console.error('Error calculating buy target:', error);
+    console.error("Error calculating buy target:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -165,23 +194,27 @@ router.post('/grid/calculate-buy-target', (req, res) => {
 /**
  * Oblicza następny cel sprzedaży (preview)
  */
-router.post('/grid/calculate-sell-target', (req, res) => {
+router.post("/grid/calculate-sell-target", (req, res) => {
   try {
     const { focusPrice, trend } = req.query;
     const settings = req.body;
-    
+
     const fp = new Decimal(focusPrice);
     const t = parseInt(trend);
-    
-    const target = GridAlgorithmService.calculateNextSellTarget(fp, t, settings);
-    
+
+    const target = GridAlgorithmService.calculateNextSellTarget(
+      fp,
+      t,
+      settings
+    );
+
     res.json({
       focusPrice: fp.toString(),
       trend: t,
-      targetPrice: target.toString()
+      targetPrice: target.toString(),
     });
   } catch (error) {
-    console.error('Error calculating sell target:', error);
+    console.error("Error calculating sell target:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -189,32 +222,76 @@ router.post('/grid/calculate-sell-target', (req, res) => {
 /**
  * Pobiera aktualne ceny
  */
-router.get('/prices', (req, res) => {
+router.get("/prices", (req, res) => {
   res.json(PriceFeedService.getAllPrices());
 });
 
 /**
  * Pobiera cenę dla konkretnego symbolu
  */
-router.get('/prices/:symbol', (req, res) => {
+router.get("/prices/:symbol", (req, res) => {
   const { symbol } = req.params;
   const price = PriceFeedService.getPrice(symbol);
   const stale = PriceFeedService.isPriceStale(symbol);
-  
+
   res.json({
     symbol: symbol.toUpperCase(),
     price: price.toString(),
-    stale
+    stale,
   });
+});
+
+/**
+ * Lista symboli i par spot z AsterDex (exchangeInfo)
+ */
+router.get("/aster/symbols", async (req, res) => {
+  try {
+    const now = Date.now();
+    if (
+      cachedAsterSymbols &&
+      now - cachedAsterSymbolsAt < ASTER_SYMBOLS_TTL_MS
+    ) {
+      return res.json(cachedAsterSymbols);
+    }
+
+    const info = await AsterSpotService.fetchExchangeInfo();
+    const symbols = Array.isArray(info.symbols) ? info.symbols : [];
+
+    const baseAssetsSet = new Set();
+    const quoteAssetsSet = new Set();
+
+    symbols.forEach((s) => {
+      if (s.baseAsset) baseAssetsSet.add(s.baseAsset);
+      if (s.quoteAsset) quoteAssetsSet.add(s.quoteAsset);
+    });
+
+    // Aster spot: jako stable obsługujemy tylko USDT
+    const allQuoteAssets = Array.from(quoteAssetsSet).sort();
+    const quoteAssets = allQuoteAssets.includes("USDT") ? ["USDT"] : [];
+
+    const payload = {
+      symbols,
+      baseAssets: Array.from(baseAssetsSet).sort(),
+      quoteAssets,
+    };
+
+    cachedAsterSymbols = payload;
+    cachedAsterSymbolsAt = now;
+
+    res.json(payload);
+  } catch (error) {
+    console.error("Error fetching Aster symbols:", error.message);
+    res.status(500).json({ error: "Failed to fetch Aster symbols" });
+  }
 });
 
 /**
  * Ręcznie ustawia cenę (dla testów/symulacji)
  */
-router.post('/prices/:symbol', (req, res) => {
+router.post("/prices/:symbol", (req, res) => {
   const { symbol } = req.params;
   const { price } = req.body;
-  
+
   PriceFeedService.setPrice(symbol, price);
   res.json({ success: true });
 });
@@ -222,23 +299,28 @@ router.post('/prices/:symbol', (req, res) => {
 /**
  * Ręcznie wywołuje przetworzenie ceny (dla testów)
  */
-router.post('/grid/process-price/:orderId', async (req, res) => {
+router.post("/grid/process-price/:orderId", async (req, res) => {
   try {
-    const walletAddress = req.headers['x-wallet-address'];
+    const walletAddress = req.headers["x-wallet-address"];
     const { orderId } = req.params;
     const { price } = req.query;
     const settings = req.body;
-    
+
     if (!walletAddress) {
-      return res.status(400).json({ error: 'Missing X-Wallet-Address header' });
+      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
     }
-    
-    GridAlgorithmService.processPrice(walletAddress, orderId, new Decimal(price), settings);
-    
+
+    GridAlgorithmService.processPrice(
+      walletAddress,
+      orderId,
+      new Decimal(price),
+      settings
+    );
+
     const state = GridAlgorithmService.getGridState(walletAddress, orderId);
     res.json(state ? state.toJSON() : null);
   } catch (error) {
-    console.error('Error processing price:', error);
+    console.error("Error processing price:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -247,19 +329,57 @@ router.post('/grid/process-price/:orderId', async (req, res) => {
 
 /**
  * Pobiera salda portfela
+ * Najpierw próbuje pobrać rzeczywiste salda z AsterDex SPOT (`GET /api/v1/account`),
+ * a jeśli się nie uda, wraca do lokalnego, symulowanego portfela.
  */
-router.get('/wallet/balances', (req, res) => {
+router.get("/wallet/balances", async (req, res) => {
   try {
-    const walletAddress = req.headers['x-wallet-address'];
-    
+    const walletAddress = req.headers["x-wallet-address"];
+
     if (!walletAddress) {
-      return res.status(400).json({ error: 'Missing X-Wallet-Address header' });
+      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
     }
-    
-    const balances = WalletService.getAllBalances(walletAddress);
+
+    let balances = {};
+
+    try {
+      // Prawdziwe salda z AsterDex SPOT
+      const account = await AsterSpotService.fetchSpotAccount(walletAddress);
+
+      if (Array.isArray(account?.balances)) {
+        const externalBalances = {};
+
+        account.balances.forEach((b) => {
+          const asset = b.asset;
+          const free = parseFloat(b.free || "0");
+          const locked = parseFloat(b.locked || "0");
+          const total = free + locked;
+
+          if (asset && total > 0) {
+            externalBalances[asset.toUpperCase()] = total.toString();
+          }
+        });
+
+        // Zsynchronizuj z wewnętrznym portfelem (używane przez algorytm/symulację)
+        await WalletService.syncBalances(walletAddress, externalBalances);
+        balances = externalBalances;
+      } else {
+        console.warn(
+          "⚠️ Aster SPOT account response bez pola balances – fallback do lokalnego portfela"
+        );
+        balances = WalletService.getAllBalances(walletAddress);
+      }
+    } catch (e) {
+      console.error(
+        "❌ Error fetching Aster SPOT balances, fallback to local wallet:",
+        e.message
+      );
+      balances = WalletService.getAllBalances(walletAddress);
+    }
+
     res.json(balances);
   } catch (error) {
-    console.error('Error getting balances:', error);
+    console.error("Error getting balances:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -267,19 +387,19 @@ router.get('/wallet/balances', (req, res) => {
 /**
  * Ustawia saldo (dla testów)
  */
-router.post('/wallet/balance', (req, res) => {
+router.post("/wallet/balance", (req, res) => {
   try {
-    const walletAddress = req.headers['x-wallet-address'];
+    const walletAddress = req.headers["x-wallet-address"];
     const { currency, balance } = req.body;
-    
+
     if (!walletAddress) {
-      return res.status(400).json({ error: 'Missing X-Wallet-Address header' });
+      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
     }
-    
+
     WalletService.setBalance(walletAddress, currency, new Decimal(balance));
     res.json({ success: true });
   } catch (error) {
-    console.error('Error setting balance:', error);
+    console.error("Error setting balance:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -287,19 +407,56 @@ router.post('/wallet/balance', (req, res) => {
 /**
  * Synchronizuje salda z zewnętrznego źródła
  */
-router.post('/wallet/sync', (req, res) => {
+router.post("/wallet/sync", async (req, res) => {
   try {
-    const walletAddress = req.headers['x-wallet-address'];
+    const walletAddress = req.headers["x-wallet-address"];
     const balances = req.body;
-    
+
     if (!walletAddress) {
-      return res.status(400).json({ error: 'Missing X-Wallet-Address header' });
+      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
     }
-    
-    WalletService.syncBalances(walletAddress, balances);
+
+    await WalletService.syncBalances(walletAddress, balances);
     res.json({ success: true });
   } catch (error) {
-    console.error('Error syncing balances:', error);
+    console.error("Error syncing balances:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Ręcznie odświeża portfel z giełdy AsterDex SPOT
+ */
+router.post("/wallet/refresh", async (req, res) => {
+  try {
+    const walletAddress = req.headers["x-wallet-address"];
+
+    if (!walletAddress) {
+      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
+    }
+
+    // Pobierz rzeczywiste salda z AsterDex SPOT i zsynchronizuj
+    const account = await AsterSpotService.fetchSpotAccount(walletAddress);
+
+    if (Array.isArray(account?.balances)) {
+      const externalBalances = {};
+      account.balances.forEach((b) => {
+        const asset = b.asset;
+        const free = parseFloat(b.free || "0");
+        const locked = parseFloat(b.locked || "0");
+        const total = free + locked;
+        if (asset && total > 0) {
+          externalBalances[asset.toUpperCase()] = total.toString();
+        }
+      });
+
+      await WalletService.syncBalances(walletAddress, externalBalances);
+      res.json({ success: true, balances: externalBalances });
+    } else {
+      res.status(500).json({ error: "Failed to fetch balances from exchange" });
+    }
+  } catch (error) {
+    console.error("Error refreshing wallet:", error);
     res.status(500).json({ error: error.message });
   }
 });

@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "description": "Plan wdrożenia integracji GridBot z AsterDex Spot oraz pełnym tradingiem na zleceniach UI",
+  "phases": [
+    {
+      "id": "prices-aster-spot",
+      "title": "Feed cen z AsterDex Spot",
+      "status": "completed",
+      "steps": [
+        "Użyć AsterSpotService do pobierania /api/v1/exchangeInfo i /api/v1/ticker/price",
+        "W PriceFeedService dodać tryb USE_ASTER_SPOT z odpytywaniem AsterDex co ASTER_POLL_MS (domyślnie 5 min)",
+        "Trzymać aktualne ceny w currentPrices i wystawiać je przez getAllPrices oraz WebSocket do frontendu"
+      ]
+    },
+    {
+      "id": "symbols-and-pairs",
+      "title": "Lista par i walut (base/quote)",
+      "status": "completed",
+      "steps": [
+        "Na backendzie wystawić endpoint z listą symboli i walut (baseAsset, quoteAsset) na podstawie exchangeInfo",
+        "Na froncie w OrderSettings dodać wybór pary: baseAsset (krypto) i quoteAsset (stablecoin)",
+        "Dodać te pola do OrderSettings w typach TS, Dashboard.defaultOrder oraz modelu UserSettings (Node + Java DTO)"
+      ]
+    },
+    {
+      "id": "ticker-ui",
+      "title": "Ticker wszystkich par na górze UI",
+      "status": "completed",
+      "steps": [
+        "Rozszerzyć komponent PriceDisplay tak, aby korzystał z /api/trading/prices (AsterDex)",
+        "Wyświetlać listę wszystkich symboli w formie poziomego tickera z auto-scroll",
+        "Podświetlać symbol aktualnie wybranej pary z aktywnego zlecenia"
+      ]
+    },
+    {
+      "id": "order-params-alignment",
+      "title": "Pełne spięcie parametrów zlecenia z algorytmem",
+      "status": "completed",
+      "steps": [
+        "Przejrzeć OrderSettings (frontend) vs UserSettings (Node) vs OrderSettingsDto (Java) i upewnić się, że wszystkie pola są zgodne",
+        "Dopieścić obsługę zakresów minPrice/maxPrice w additionalBuyValues, additionalSellValues, maxBuyPerTransaction, maxSellPerTransaction, buySwingPercent, sellSwingPercent",
+        "Upewnić się, że GridAlgorithmService (JS i Java) korzysta z tych samych struktur danych, co UI"
+      ]
+    },
+    {
+      "id": "exchange-service",
+      "title": "Warstwa wymiany spot (prawdziwe zlecenia na AsterDex)",
+      "status": "completed",
+      "steps": [
+        "Na backendzie dodać ExchangeService oparty na AsterSpotService z metodami placeSpotBuy/placeSpotSell",
+        "Użyć sygnowanych endpointów TRADE z podpisem HMAC SHA256 zgodnie z dokumentacją AsterDex",
+        "Na początek zaimplementować tryb paper-trading sterowany flagą w .env, który dalej korzysta z WalletService (symulacja) zamiast realnych zleceń"
+      ]
+    },
+    {
+      "id": "grid-execution",
+      "title": "Podpięcie ExchangeService pod GridAlgorithmService",
+      "status": "pending",
+      "steps": [
+        "W executeBuy/executeSell/executeSellShort/executeSellBuyback w GridAlgorithmService wywoływać ExchangeService zamiast czystego WalletService",
+        "Logować szczegółowo każde zlecenie (symbol, side, amount, price, orderId) dla łatwego debugowania",
+        "Zachować dotychczasową aktualizację GridState i Position po potwierdzeniu sukcesu zlecenia"
+      ]
+    },
+    {
+      "id": "scheduler-integration",
+      "title": "Scheduler GRID + feed cen AsterDex",
+      "status": "completed",
+      "steps": [
+        "Upewnić się, że GridSchedulerService dla każdego aktywnego zlecenia bierze cenę z PriceFeedService (AsterDex)",
+        "Dopasować częstotliwość schedulera (obecnie co 5s) do okna czasowego strategii i limitów API",
+        "Dodać monitoring/logi błędów na poziomie schedulera (brak cen, błędy zleceń, itp.)"
+      ]
+    }
+  ]
+}

@@ -8,12 +8,20 @@ db.exec(`
     wallet_address TEXT UNIQUE NOT NULL,
     wallet_currencies TEXT DEFAULT '[]',
     orders TEXT DEFAULT '[]',
+    api_config TEXT DEFAULT '{}',
     created_at TEXT,
     updated_at TEXT
   );
   
   CREATE INDEX IF NOT EXISTS idx_user_settings_wallet ON user_settings(wallet_address);
 `);
+
+// Best-effort migration: dodaj kolumnę api_config jeśli jej brakuje (dla starych baz)
+try {
+  db.exec("ALTER TABLE user_settings ADD COLUMN api_config TEXT DEFAULT '{}';");
+} catch (e) {
+  // Ignoruj jeśli kolumna już istnieje
+}
 
 /**
  * UserSettings model - SQLite version
@@ -23,9 +31,11 @@ export class UserSettings {
     this.id = data.id || uuidv4();
     this.walletAddress = data.walletAddress || data.wallet_address;
     this.wallet = this._parseJson(
-      data.wallet || data.wallet_currencies || "[]"
+      data.wallet || data.wallet_currencies || "[]",
     );
     this.orders = this._parseJson(data.orders || "[]");
+    // Konfiguracja API per użytkownik (zaszyfrowane klucze, nazwa konta, avatar)
+    this.apiConfig = this._parseJson(data.apiConfig || data.api_config || "{}");
     this.createdAt = data.createdAt || data.created_at;
     this.updatedAt = data.updatedAt || data.updated_at;
 
@@ -36,12 +46,15 @@ export class UserSettings {
           id: uuidv4(),
           name: "Zlecenie 1",
           isActive: false,
-          refreshInterval: 60,
+          refreshInterval: 5,
           minProfitPercent: 0.5,
           focusPrice: 94000,
           timeToNewFocus: 0,
+          baseAsset: "BTC",
+          // Na spocie jako stable używamy USDT
+          quoteAsset: "USDT",
           buy: {
-            currency: "USDC",
+            currency: "USDT",
             walletProtection: 100,
             mode: "walletLimit",
             maxValue: 0,
@@ -55,7 +68,7 @@ export class UserSettings {
             addProfit: false,
           },
           platform: {
-            minTransactionValue: 10,
+            minTransactionValue: 0,
             checkFeeProfit: true,
           },
           buyConditions: {
@@ -128,8 +141,8 @@ export class UserSettings {
     if (!this.createdAt) this.createdAt = now;
 
     const stmt = db.prepare(`
-      INSERT OR REPLACE INTO user_settings (id, wallet_address, wallet_currencies, orders, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO user_settings (id, wallet_address, wallet_currencies, orders, api_config, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -137,8 +150,9 @@ export class UserSettings {
       this.walletAddress,
       JSON.stringify(this.wallet),
       JSON.stringify(this.orders),
+      JSON.stringify(this.apiConfig || {}),
       this.createdAt,
-      this.updatedAt
+      this.updatedAt,
     );
 
     return this;

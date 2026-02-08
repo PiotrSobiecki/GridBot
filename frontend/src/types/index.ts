@@ -68,6 +68,10 @@ export interface OrderSettings {
   buyTrendCounter: number;
   sellTrendCounter: number;
 
+  // Para handlowa
+  baseAsset?: string; // np. BTC
+  quoteAsset?: string; // np. USDT (stable na spocie)
+
   // 2# Wymagania KUPNO/SPRZEDAŻ
   buy: BuySellSettings;
   sell: BuySellSettings;
@@ -163,4 +167,5 @@ export interface PriceData {
   symbol: string;
   price: number;
   timestamp: number;
+  priceChangePercent?: number | null; // Zmiana ceny z 24h (z AsterDex)
 }

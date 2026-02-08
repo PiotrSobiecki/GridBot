@@ -5,7 +5,7 @@ import {
   Pause,
   Save,
   Trash2,
-  RefreshCw,
+  Copy,
   ChevronDown,
   ChevronUp,
   AlertTriangle,
@@ -24,6 +24,7 @@ import type { OrderSettings as OrderSettingsType, GridState } from "../types";
 interface OrderSettingsProps {
   order: OrderSettingsType;
   gridState: GridState | null;
+  onDuplicate?: () => void;
 }
 
 type Section =
@@ -38,8 +39,9 @@ type Section =
 export default function OrderSettings({
   order,
   gridState,
+  onDuplicate,
 }: OrderSettingsProps) {
-  const { walletAddress, setUserSettings, userSettings, setGridState } =
+  const { walletAddress, setUserSettings, userSettings, setGridState, prices, gridStates } =
     useStore();
   const [localOrder, setLocalOrder] = useState(order);
   const [expandedSections, setExpandedSections] = useState<Set<Section>>(
@@ -49,10 +51,61 @@ export default function OrderSettings({
   const [isStarting, setIsStarting] = useState(false);
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  // Ograniczona lista dostępnych krypto BASE
+  const [baseAssets, setBaseAssets] = useState<string[]>([
+    "ASTER",
+    "BTC",
+    "ETH",
+    "SOL",
+    "BNB",
+    "XRP",
+  ]);
+  // Na Aster spot jako stable obsługujemy tylko USDT
+  const [quoteAssets, setQuoteAssets] = useState<string[]>(["USDT"]);
 
+  // Synchronizuj localOrder z prop order (np. przy przełączeniu zakładki)
   useEffect(() => {
     setLocalOrder(order);
-  }, [order]);
+  }, [order?._id, order?.focusPrice, order?.refreshInterval, order?.name]);
+
+  // Utrzymuj spójność walut kupna/sprzedaży z wybraną parą BASE/QUOTE
+  useEffect(() => {
+    setLocalOrder((prev) => {
+      if (!prev) return prev;
+      let changed = false;
+      const next: any = { ...prev };
+
+      if (prev.baseAsset && prev.sell?.currency !== prev.baseAsset) {
+        next.sell = { ...prev.sell, currency: prev.baseAsset };
+        changed = true;
+      }
+      if (prev.quoteAsset && prev.buy?.currency !== prev.quoteAsset) {
+        next.buy = { ...prev.buy, currency: prev.quoteAsset };
+        changed = true;
+      }
+
+      return changed ? next : prev;
+    });
+  }, [localOrder.baseAsset, localOrder.quoteAsset]);
+
+  // Wyłączone pobieranie z API - używamy sztywnej listy krypto
+  // useEffect(() => {
+  //   // Załaduj listę par z backendu (AsterDex)
+  //   api
+  //     .getAsterSymbols()
+  //     .then((data) => {
+  //       if (Array.isArray(data.baseAssets) && data.baseAssets.length > 0) {
+  //         setBaseAssets(data.baseAssets);
+  //       }
+  //       if (Array.isArray(data.quoteAssets) && data.quoteAssets.length > 0) {
+  //         setQuoteAssets(data.quoteAssets);
+  //       }
+  //     })
+  //     .catch((err: any) => {
+  //       console.error("Failed to load Aster symbols:", err);
+  //       toast.error("Nie udało się pobrać listy par z giełdy");
+  //     });
+  // }, []);
 
   const toggleSection = (section: Section) => {
     const newSections = new Set(expandedSections);
@@ -78,18 +131,77 @@ export default function OrderSettings({
     setLocalOrder(newOrder);
   };
 
+  // Jednolity format cen jak w "Stan algorytmu w czasie rzeczywistym": $X,XXX.XX
+  const formatPrice = (n: number | null | undefined): string => {
+    if (n == null || Number.isNaN(n)) return "—";
+    return `$${Number(n).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  };
+
   const handleSave = async () => {
     if (!order._id) return;
 
     setIsSaving(true);
     try {
-      await api.updateOrder(order._id, localOrder);
+      // Sanitizacja pól, które mogą mieć chwilowo pusty string z inputów
+      const sanitizedOrder: any = {
+        ...localOrder,
+        buyConditions: {
+          ...localOrder.buyConditions,
+          minValuePer1Percent: Number(
+            (localOrder.buyConditions as any).minValuePer1Percent || 0
+          ),
+          priceThreshold: Number(
+            (localOrder.buyConditions as any).priceThreshold || 0
+          ),
+        },
+        sellConditions: {
+          ...localOrder.sellConditions,
+          minValuePer1Percent: Number(
+            (localOrder.sellConditions as any).minValuePer1Percent || 0
+          ),
+          priceThreshold: Number(
+            (localOrder.sellConditions as any).priceThreshold || 0
+          ),
+        },
+      };
 
-      if (userSettings) {
+      await api.updateOrder(order._id, sanitizedOrder);
+
+      // Pobierz świeże dane z backendu po zapisaniu
+      const freshSettings = await api.getSettings();
+      if (freshSettings) {
+        setUserSettings(freshSettings);
+        // Zaktualizuj lokalny stan zlecenia - użyj sanitizedOrder (zapisanego) jako bazę
+        const freshOrder = freshSettings.orders?.find(
+          (o: any) => (o._id || o.id) === order._id
+        );
+        // Aktualizuj localOrder z zapisanymi danymi (sanitizedOrder ma wszystkie pola z formularza)
+        const updatedLocalOrder = freshOrder
+          ? { ...sanitizedOrder, ...freshOrder, _id: order._id }
+          : { ...sanitizedOrder, _id: order._id };
+        setLocalOrder(updatedLocalOrder);
+
+        // Odśwież też stan gridu (gridState) żeby "Cena Focus" na górze się zaktualizowała
+        if (walletAddress && order._id) {
+          try {
+            const freshGridState = await api.getGridState(walletAddress, order._id);
+            if (freshGridState) {
+              setGridState(order._id, freshGridState);
+            }
+          } catch (err) {
+            // Cicho ignoruj jeśli grid jeszcze nie istnieje
+          }
+        }
+      } else if (userSettings) {
+        // Fallback: aktualizuj lokalnie jeśli pobranie z backendu nie powiodło się
         const updatedOrders = userSettings.orders.map((o) =>
-          o._id === order._id ? { ...localOrder, _id: order._id } : o
+          o._id === order._id ? { ...sanitizedOrder, _id: order._id } : o
         );
         setUserSettings({ ...userSettings, orders: updatedOrders });
+        setLocalOrder({ ...sanitizedOrder, _id: order._id });
       }
 
       toast.success("Zapisano ustawienia");
@@ -110,19 +222,18 @@ export default function OrderSettings({
         setGridState(order._id, { ...gridState, isActive: false });
         toast.success("Zatrzymano algorytm");
       } else {
-        // Initialize grid if not exists
+        let stateToUpdate: typeof gridState = gridState;
         if (!gridState) {
           const state = await api.initGrid(walletAddress, {
             ...localOrder,
             id: order._id,
           });
           setGridState(order._id, state);
+          stateToUpdate = state;
         }
 
         await api.startGrid(walletAddress, order._id);
-        if (gridState) {
-          setGridState(order._id, { ...gridState, isActive: true });
-        }
+        setGridState(order._id, { ...stateToUpdate!, isActive: true });
         toast.success("Uruchomiono algorytm");
       }
     } catch (error: any) {
@@ -159,16 +270,16 @@ export default function OrderSettings({
   return (
     <div className="bg-grid-card rounded-xl border border-grid-border overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-grid-border">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 p-3 sm:p-4 border-b border-grid-border">
+        <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0 w-full sm:w-auto">
           <input
             type="text"
             value={localOrder.name}
             onChange={(e) => updateField("name", e.target.value)}
-            className="bg-transparent text-lg font-semibold focus:outline-none focus:border-b focus:border-emerald-500"
+            className="bg-transparent text-base sm:text-lg font-semibold focus:outline-none focus:border-b focus:border-emerald-500 flex-1 min-w-0"
           />
           <span
-            className={`px-2 py-1 rounded text-xs font-medium ${
+            className={`px-2 py-1 rounded text-[10px] sm:text-xs font-medium whitespace-nowrap ${
               isRunning ? "status-active" : "status-inactive"
             }`}
           >
@@ -176,11 +287,11 @@ export default function OrderSettings({
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap w-full sm:w-auto">
           <button
             onClick={handleStartStop}
             disabled={isStarting}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+            className={`flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors ${
               isRunning
                 ? "bg-red-500/20 text-red-400 hover:bg-red-500/30"
                 : "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30"
@@ -188,13 +299,13 @@ export default function OrderSettings({
           >
             {isRunning ? (
               <>
-                <Pause className="w-4 h-4" />
-                Stop
+                <Pause className="w-3 h-3 sm:w-4 sm:h-4" />
+                <span className="hidden sm:inline">Stop</span>
               </>
             ) : (
               <>
-                <Play className="w-4 h-4" />
-                Start
+                <Play className="w-3 h-3 sm:w-4 sm:h-4" />
+                <span className="hidden sm:inline">Start</span>
               </>
             )}
           </button>
@@ -202,17 +313,28 @@ export default function OrderSettings({
           <button
             onClick={() => setShowSaveConfirm(true)}
             disabled={isSaving}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 font-medium transition-colors"
+            className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 text-xs sm:text-sm font-medium transition-colors"
           >
-            <Save className="w-4 h-4" />
-            Zapisz
+            <Save className="w-3 h-3 sm:w-4 sm:h-4" />
+            <span className="hidden sm:inline">Zapisz</span>
           </button>
+
+          {onDuplicate && (
+            <button
+              onClick={onDuplicate}
+              className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-gray-500/20 text-gray-300 hover:bg-gray-500/30 text-xs sm:text-sm font-medium transition-colors"
+              title="Duplikuj zlecenie"
+            >
+              <Copy className="w-3 h-3 sm:w-4 sm:h-4" />
+              <span className="hidden sm:inline">Duplikuj</span>
+            </button>
+          )}
 
           <button
             onClick={() => setShowDeleteConfirm(true)}
-            className="p-2 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            className="p-1.5 sm:p-2 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="w-3 h-3 sm:w-4 sm:h-4" />
           </button>
         </div>
       </div>
@@ -226,16 +348,16 @@ export default function OrderSettings({
           isExpanded={expandedSections.has("general")}
           onToggle={() => toggleSection("general")}
         >
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             {/* Główne ustawienia */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
               <InputField
                 label="1. Odświeżanie"
                 value={localOrder.refreshInterval}
                 onChange={(v) => updateField("refreshInterval", Number(v))}
                 type="number"
                 suffix="sek"
-                hint="Co jaki czas lecą zapytania"
+                hint="Co jaki czas zapytania (min. 1 s)"
               />
               <InputField
                 label="2. Min zarobek %"
@@ -246,14 +368,46 @@ export default function OrderSettings({
                 suffix="%"
                 hint="Min % zysku do realizacji"
               />
-              <InputField
-                label="3. Cena Focus"
-                value={localOrder.focusPrice}
-                onChange={(v) => updateField("focusPrice", Number(v))}
-                type="number"
-                suffix="$"
-                hint="Cena bazowa do obliczeń"
-              />
+              <div>
+                <InputField
+                  label="3. Cena Focus"
+                  value={localOrder.focusPrice}
+                  onChange={(v) => updateField("focusPrice", Number(v))}
+                  type="number"
+                  suffix="$"
+                  hint="Cena bazowa do obliczeń"
+                />
+                {(() => {
+                  const base =
+                    localOrder.baseAsset || localOrder.sell?.currency || "";
+                  const quote =
+                    localOrder.quoteAsset || localOrder.buy?.currency || "USDT";
+                  const symbol = `${base}${quote}`;
+                  const priceData = prices[symbol];
+                  const currentPrice =
+                    typeof priceData?.price === "number"
+                      ? priceData.price
+                      : Number(priceData?.price || 0);
+                  const hasPrice = !!base && currentPrice > 0;
+                  return hasPrice ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateField("focusPrice", Math.round(currentPrice * 100) / 100);
+                        toast.success(
+                          `Cena Focus ustawiona na aktualną: $${currentPrice.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}`
+                        );
+                      }}
+                      className="mt-1 text-xs text-emerald-400 hover:text-emerald-300 hover:underline"
+                    >
+                      Użyj aktualnej ceny
+                    </button>
+                  ) : null;
+                })()}
+              </div>
               <InputField
                 label="4. Czas do nowego focus"
                 value={localOrder.timeToNewFocus}
@@ -262,6 +416,76 @@ export default function OrderSettings({
                 suffix="sek"
                 hint="0 = wyłączone"
               />
+            </div>
+
+            {/* Para handlowa */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
+              <SelectField
+                label="5. Krypto (BASE)"
+                value={localOrder.baseAsset || localOrder.sell.currency}
+                options={baseAssets}
+                onChange={(v) => {
+                  updateField("baseAsset", v);
+                  updateField("sell.currency", v);
+                }}
+              />
+              <SelectField
+                label="6. Stable (QUOTE)"
+                value={localOrder.quoteAsset || localOrder.buy.currency}
+                options={quoteAssets}
+                onChange={(v) => {
+                  updateField("quoteAsset", v);
+                  updateField("buy.currency", v);
+                }}
+              />
+              {/* Aktualna cena - nieedytowalne */}
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  7. Aktualna cena
+                </label>
+                <div className="w-full px-3 py-2 bg-grid-bg border border-grid-border rounded-lg text-sm font-mono text-gray-200 flex items-center justify-between">
+                  <span>
+                    {(() => {
+                      const baseAsset =
+                        localOrder.baseAsset || localOrder.sell.currency || "";
+                      const quoteAsset =
+                        localOrder.quoteAsset ||
+                        localOrder.buy.currency ||
+                        "USDT";
+                      const symbol = `${baseAsset}${quoteAsset}`;
+                      const priceData = prices[symbol];
+                      const price =
+                        typeof priceData?.price === "number"
+                          ? priceData.price
+                          : Number(priceData?.price || 0);
+
+                      if (!baseAsset || price === 0) {
+                        return "—";
+                      }
+
+                      // Formatowanie w zależności od symbolu
+                      if (symbol.includes("DOGE") || symbol.includes("SHIB")) {
+                        return `$${price.toFixed(5)}`;
+                      }
+                      if (price < 1) {
+                        return `$${price.toFixed(4)}`;
+                      }
+                      return `$${price.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}`;
+                    })()}
+                  </span>
+                  <Activity className="w-4 h-4 text-gray-500" />
+                </div>
+                <div className="text-[11px] text-gray-500 mt-1">
+                  Cena dla pary{" "}
+                  <strong>
+                    {localOrder.baseAsset || localOrder.sell.currency || "—"}/
+                    {localOrder.quoteAsset || localOrder.buy.currency || "USDT"}
+                  </strong>
+                </div>
+              </div>
             </div>
 
             {/* Wyjaśnienie ceny focus */}
@@ -277,7 +501,7 @@ export default function OrderSettings({
             </div>
 
             {/* Liczniki trendów - tylko do odczytu */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
                 <div className="flex items-center justify-between">
                   <div>
@@ -319,27 +543,27 @@ export default function OrderSettings({
                 <div className="text-xs text-gray-500 mb-2">
                   📊 Stan algorytmu w czasie rzeczywistym:
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                  <div>
-                    <span className="text-gray-500">Następny zakup: </span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4 text-xs sm:text-sm">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-gray-500">Następny zakup:</span>
                     <span className="font-mono text-emerald-400">
-                      ${gridState.nextBuyTarget?.toLocaleString()}
+                      {formatPrice(gridState.nextBuyTarget)}
                     </span>
                   </div>
-                  <div>
-                    <span className="text-gray-500">Następna sprzedaż: </span>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-gray-500">Następna sprzedaż:</span>
                     <span className="font-mono text-red-400">
-                      ${gridState.nextSellTarget?.toLocaleString()}
+                      {formatPrice(gridState.nextSellTarget)}
                     </span>
                   </div>
-                  <div>
-                    <span className="text-gray-500">Ostatnia cena: </span>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-gray-500">Ostatnia cena:</span>
                     <span className="font-mono text-white">
-                      ${gridState.lastKnownPrice?.toLocaleString() ?? "-"}
+                      {formatPrice(gridState.lastKnownPrice)}
                     </span>
                   </div>
-                  <div>
-                    <span className="text-gray-500">Profit: </span>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-gray-500">Profit:</span>
                     <span
                       className={`font-mono ${
                         gridState.totalProfit > 0
@@ -347,7 +571,7 @@ export default function OrderSettings({
                           : "text-gray-400"
                       }`}
                     >
-                      ${gridState.totalProfit?.toFixed(2) ?? "0.00"}
+                      {formatPrice(gridState.totalProfit)}
                     </span>
                   </div>
                 </div>
@@ -364,13 +588,18 @@ export default function OrderSettings({
           isExpanded={expandedSections.has("buy")}
           onToggle={() => toggleSection("buy")}
         >
-          <div className="grid grid-cols-2 gap-4">
-            <SelectField
-              label="Waluta"
-              value={localOrder.buy.currency}
-              options={["USDC", "USDT", "EUR", "USD"]}
-              onChange={(v) => updateField("buy.currency", v)}
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+            {/* Waluta kupna zawsze = stable z wybranej pary (QUOTE) */}
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Waluta</label>
+              <div className="w-full px-3 py-2 bg-grid-bg border border-grid-border rounded-lg text-sm text-gray-200">
+                {localOrder.quoteAsset || localOrder.buy.currency}
+              </div>
+              <div className="text-[11px] text-gray-500 mt-1">
+                Ustalana automatycznie z pola <strong>Stable (QUOTE)</strong>{" "}
+                powyżej.
+              </div>
+            </div>
             <InputField
               label="Zabezpieczenie portfela"
               value={localOrder.buy.walletProtection}
@@ -410,13 +639,18 @@ export default function OrderSettings({
           isExpanded={expandedSections.has("sell")}
           onToggle={() => toggleSection("sell")}
         >
-          <div className="grid grid-cols-2 gap-4">
-            <SelectField
-              label="Waluta"
-              value={localOrder.sell.currency}
-              options={["BTC", "ETH", "DOGE", "SOL"]}
-              onChange={(v) => updateField("sell.currency", v)}
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+            {/* Waluta sprzedaży zawsze = krypto z wybranej pary (BASE) */}
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Waluta</label>
+              <div className="w-full px-3 py-2 bg-grid-bg border border-grid-border rounded-lg text-sm text-gray-200">
+                {localOrder.baseAsset || localOrder.sell.currency}
+              </div>
+              <div className="text-[11px] text-gray-500 mt-1">
+                Ustalana automatycznie z pola <strong>Krypto (BASE)</strong>{" "}
+                powyżej.
+              </div>
+            </div>
             <InputField
               label="Zabezpieczenie portfela"
               value={localOrder.sell.walletProtection}
@@ -470,7 +704,7 @@ export default function OrderSettings({
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
               {/* KUPNO */}
               <div className="p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
                 <h4 className="text-sm font-medium text-emerald-400 mb-4 flex items-center gap-2">
@@ -484,7 +718,7 @@ export default function OrderSettings({
                     onChange={(v) =>
                       updateField(
                         "buyConditions.minValuePer1Percent",
-                        Number(v)
+                        v === "" ? "" : Number(v)
                       )
                     }
                     type="number"
@@ -495,7 +729,10 @@ export default function OrderSettings({
                     label="2. Próg cenowy zakupu"
                     value={localOrder.buyConditions.priceThreshold}
                     onChange={(v) =>
-                      updateField("buyConditions.priceThreshold", Number(v))
+                      updateField(
+                        "buyConditions.priceThreshold",
+                        v === "" ? "" : Number(v)
+                      )
                     }
                     type="number"
                     suffix="$"
@@ -534,7 +771,7 @@ export default function OrderSettings({
                     onChange={(v) =>
                       updateField(
                         "sellConditions.minValuePer1Percent",
-                        Number(v)
+                        v === "" ? "" : Number(v)
                       )
                     }
                     type="number"
@@ -545,7 +782,10 @@ export default function OrderSettings({
                     label="2. Próg cenowy sprzedaży"
                     value={localOrder.sellConditions.priceThreshold}
                     onChange={(v) =>
-                      updateField("sellConditions.priceThreshold", Number(v))
+                      updateField(
+                        "sellConditions.priceThreshold",
+                        v === "" ? "" : Number(v)
+                      )
                     }
                     type="number"
                     suffix="$"
@@ -580,10 +820,14 @@ export default function OrderSettings({
               <div className="text-gray-500">
                 Próg cenowy zakupu ={" "}
                 <span className="text-emerald-400 font-mono">
-                  ${localOrder.buyConditions.priceThreshold.toLocaleString()}
+                  {formatPrice(localOrder.buyConditions.priceThreshold)}
                 </span>
                 <br />
-                Jeśli cena BTC przekroczy ten próg, algorytm zatrzyma wyliczanie
+                Jeśli cena{" "}
+                <span className="font-mono">
+                  {localOrder.baseAsset || "BTC"}
+                </span>{" "}
+                przekroczy ten próg, algorytm zatrzyma wyliczanie
                 nowej ceny focus i nie wykona zakupu, dopóki cena nie spadnie
                 poniżej progu.
               </div>
@@ -756,8 +1000,11 @@ export default function OrderSettings({
             {/* Przykład obliczenia */}
             <div className="mt-4 p-3 rounded-lg bg-grid-bg/50 border border-grid-border text-xs">
               <div className="text-gray-400 mb-2">
-                📊 Przykład obliczenia (Focus = $
-                {localOrder.focusPrice.toLocaleString()}):
+                📊 Przykład obliczenia (Focus ={" "}
+                <span className="font-mono text-amber-400">
+                  {formatPrice(localOrder.focusPrice)}
+                </span>
+                ):
               </div>
               {localOrder.trendPercents.slice(0, 3).map((tp) => {
                 const buyTarget =
@@ -769,18 +1016,12 @@ export default function OrderSettings({
                     <span className="text-gray-500 w-16">
                       Trend {tp.trend}:
                     </span>
-                    <span className="text-emerald-400">
-                      Zakup @ $
-                      {buyTarget.toLocaleString(undefined, {
-                        maximumFractionDigits: 0,
-                      })}
+                    <span className="text-emerald-400 font-mono">
+                      Zakup @ {formatPrice(buyTarget)}
                     </span>
                     <span className="text-gray-600">|</span>
-                    <span className="text-red-400">
-                      Sprzedaż @ $
-                      {sellTarget.toLocaleString(undefined, {
-                        maximumFractionDigits: 0,
-                      })}
+                    <span className="text-red-400 font-mono">
+                      Sprzedaż @ {formatPrice(sellTarget)}
                     </span>
                   </div>
                 );
@@ -996,16 +1237,16 @@ function SettingsSection({
     <div>
       <button
         onClick={onToggle}
-        className="w-full flex items-center justify-between p-4 hover:bg-grid-bg/30 transition-colors"
+        className="w-full flex items-center justify-between p-3 sm:p-4 hover:bg-grid-bg/30 transition-colors"
       >
-        <div className="flex items-center gap-3">
-          <Icon className={`w-5 h-5 ${iconColor}`} />
-          <span className="font-medium">{title}</span>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <Icon className={`w-4 h-4 sm:w-5 sm:h-5 ${iconColor}`} />
+          <span className="font-medium text-sm sm:text-base">{title}</span>
         </div>
         {isExpanded ? (
-          <ChevronUp className="w-5 h-5 text-gray-500" />
+          <ChevronUp className="w-4 h-4 sm:w-5 sm:h-5 text-gray-500" />
         ) : (
-          <ChevronDown className="w-5 h-5 text-gray-500" />
+          <ChevronDown className="w-4 h-4 sm:w-5 sm:h-5 text-gray-500" />
         )}
       </button>
 
@@ -1018,7 +1259,7 @@ function SettingsSection({
             transition={{ duration: 0.2 }}
             className="overflow-hidden"
           >
-            <div className="p-4 pt-0 bg-grid-bg/20">{children}</div>
+            <div className="p-3 sm:p-4 pt-0 bg-grid-bg/20">{children}</div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1047,7 +1288,7 @@ function InputField({
 }) {
   return (
     <div>
-      <label className="block text-xs text-gray-500 mb-1">{label}</label>
+      <label className="block text-[10px] sm:text-xs text-gray-500 mb-1">{label}</label>
       <div className="relative">
         <input
           type={type}
@@ -1055,17 +1296,17 @@ function InputField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
-          className={`w-full px-3 py-2 bg-grid-bg border border-grid-border rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
-            suffix ? "pr-12" : ""
+          className={`w-full px-2 sm:px-3 py-1.5 sm:py-2 bg-grid-bg border border-grid-border rounded-lg text-xs sm:text-sm font-mono focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
+            suffix ? "pr-10 sm:pr-12" : ""
           }`}
         />
         {suffix && (
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">
+          <span className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs sm:text-sm">
             {suffix}
           </span>
         )}
       </div>
-      {hint && <div className="text-xs text-gray-600 mt-1">{hint}</div>}
+      {hint && <div className="text-[10px] sm:text-xs text-gray-600 mt-1">{hint}</div>}
     </div>
   );
 }

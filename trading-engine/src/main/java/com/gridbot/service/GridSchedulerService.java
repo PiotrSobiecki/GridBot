@@ -9,6 +9,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -35,9 +37,9 @@ public class GridSchedulerService {
     }
     
     /**
-     * Przetwarza wszystkie aktywne zlecenia co 5 sekund
+     * Przetwarza wszystkie aktywne zlecenia w interwale z konfiguracji (domyślnie 5 s – zgodnie z odświeżaniem na froncie)
      */
-    @Scheduled(fixedRate = 5000)
+    @Scheduled(fixedRateString = "${gridbot.trading.scheduler-interval-ms:5000}")
     public void processActiveOrders() {
         List<GridState> activeStates = gridStateRepository.findByIsActiveTrue();
         
@@ -60,6 +62,15 @@ public class GridSchedulerService {
         if (settings == null) {
             log.warn("Settings not found for order {}", state.getOrderId());
             return;
+        }
+
+        // Uszanuj refreshInterval z frontu (w sekundach) – ten sam co odświeżanie na stronie
+        int refreshIntervalSec = settings.getRefreshInterval() > 0 ? settings.getRefreshInterval() : 5;
+        if (state.getLastUpdated() != null && refreshIntervalSec > 0) {
+            long elapsedSec = Duration.between(state.getLastUpdated(), Instant.now()).getSeconds();
+            if (elapsedSec < refreshIntervalSec) {
+                return;
+            }
         }
         
         // Pobierz aktualną cenę

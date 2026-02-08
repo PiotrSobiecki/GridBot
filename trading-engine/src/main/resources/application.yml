@@ -32,7 +32,9 @@ gridbot:
   
   trading:
     simulation-mode: true
-    
+    # Interwał schedulera (ms) – sprawdzanie cen i wykonywanie (zgodnie z odświeżaniem na froncie)
+    scheduler-interval-ms: ${GRID_SCHEDULER_INTERVAL_MS:5000}
+
     price-feed:
       url: wss://stream.binance.com:9443/ws
       symbols:
