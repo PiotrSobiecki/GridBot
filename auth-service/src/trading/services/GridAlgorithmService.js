@@ -227,11 +227,11 @@ function meetsMinTransactionValue(transactionValue, settings) {
   try {
     const tx = new Decimal(transactionValue || 0);
     // Minimalna wartość z ustawień (jeśli użytkownik chce wyższy próg)
-    const userMin = new Decimal(settings?.platform?.minTransactionValue || 0);
+
     // Minimalna wartość narzucona przez giełdę
     const exchangeMin = new Decimal(5); // 5 USDT
 
-    const effectiveMin = Decimal.max(userMin, exchangeMin);
+    const effectiveMin = exchangeMin;
 
     if (effectiveMin.lte(0)) {
       return true;
@@ -241,7 +241,7 @@ function meetsMinTransactionValue(transactionValue, settings) {
 
     if (DEBUG_CONDITIONS) {
       console.log(
-        `🔍 minTransactionValue check: tx=${tx.toString()} minUser=${userMin.toString()} minExchange=${exchangeMin.toString()} → effective=${effectiveMin.toString()} ok=${ok}`,
+        `🔍 minTransactionValue check: tx=${tx.toString()} minExchange=${exchangeMin.toString()} → effective=${effectiveMin.toString()} ok=${ok}`,
       );
     }
 
@@ -694,9 +694,13 @@ async function executeBuySell(currentPrice, position, state, settings) {
   state.totalSoldValue = new Decimal(state.totalSoldValue || 0)
     .plus(executedSellValue)
     .toNumber();
-  state.totalProfit = new Decimal(state.totalProfit || 0)
-    .plus(executedProfit)
-    .toNumber();
+  // Przelicz łączny profit na podstawie wszystkich ZAMKNIĘTYCH pozycji
+  // (long + short) dla danego zlecenia – dzięki temu Total Profit w UI
+  // zawsze odpowiada sumie z tabeli zamkniętych pozycji.
+  state.totalProfit = Position.getTotalClosedProfit(
+    state.walletAddress,
+    state.orderId,
+  );
 
   // Ustaw focus na cenę sprzedaży (zawsze > 0)
   state.currentFocusPrice = finalSellPrice;
@@ -1045,9 +1049,11 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
   state.totalBoughtValue = new Decimal(state.totalBoughtValue || 0)
     .plus(executedBuybackValue)
     .toNumber();
-  state.totalProfit = new Decimal(state.totalProfit || 0)
-    .plus(executedProfit)
-    .toNumber();
+  // Spójne przeliczenie totalProfit na podstawie zamkniętych pozycji
+  state.totalProfit = Position.getTotalClosedProfit(
+    state.walletAddress,
+    state.orderId,
+  );
   state.currentFocusPrice = buybackPriceNum;
   state.focusLastUpdated = new Date().toISOString();
   state.nextSellTarget = calculateNextSellTarget(

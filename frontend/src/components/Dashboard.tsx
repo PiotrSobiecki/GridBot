@@ -239,11 +239,9 @@ export default function Dashboard() {
             }
 
             if (!isNaN(numPrice) && numPrice > 0) {
-              useStore
-                .getState()
-                .updatePrice(symbol, numPrice, changePercent);
+              useStore.getState().updatePrice(symbol, numPrice, changePercent);
             }
-          }
+          },
         );
       } catch (error) {
         console.error("Failed to fetch prices:", error);
@@ -274,12 +272,7 @@ export default function Dashboard() {
     refreshGridState();
     const interval = setInterval(refreshGridState, gridRefreshIntervalMs);
     return () => clearInterval(interval);
-  }, [
-    walletAddress,
-    activeOrder?._id,
-    setGridState,
-    gridRefreshIntervalMs,
-  ]);
+  }, [walletAddress, activeOrder?._id, setGridState, gridRefreshIntervalMs]);
 
   const handleAddOrder = async () => {
     try {
@@ -362,21 +355,23 @@ export default function Dashboard() {
       <header className="border-b border-grid-border bg-grid-card/80 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-2 sm:px-4 py-2 sm:py-4">
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2 md:gap-0">
-            {/* Logo */}
+            {/* Lewa: tylko logo */}
             <div className="flex items-center gap-2 sm:gap-3">
               <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
                 <Zap className="w-4 h-4 sm:w-6 sm:h-6 text-white" />
               </div>
-              <span className="font-display font-bold text-lg sm:text-xl">GridBot</span>
+              <span className="font-display font-bold text-lg sm:text-xl">
+                GridBot
+              </span>
             </div>
 
-            {/* Price Ticker */}
-            <div className="hidden md:block">
+            {/* Środek: pasek cen (marginesy od logo i od prawego bloku) */}
+            <div className="hidden md:block flex-1 min-w-0 ml-40 mr-2">
               <PriceDisplay />
             </div>
 
-            {/* User Actions */}
-            <div className="flex items-center gap-2 sm:gap-4 w-full md:w-auto justify-between md:justify-end">
+            {/* Prawa: awatar, ustawienia, adres portfela, wylogowanie */}
+            <div className="flex items-center gap-2 sm:gap-4 w-full md:w-auto justify-end">
               {apiProfile && (
                 <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-grid-border bg-black/20">
                   <div className="w-7 h-7 rounded-full bg-black/40 border border-grid-border flex items-center justify-center overflow-hidden">
@@ -421,10 +416,11 @@ export default function Dashboard() {
                   {formatAddress(walletAddress || "")}
                 </span>
                 <span className="font-mono text-xs sm:hidden">
-                  {walletAddress ? `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}` : ""}
+                  {walletAddress
+                    ? `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`
+                    : ""}
                 </span>
               </button>
-
               <button
                 onClick={handleLogout}
                 className="p-2 rounded-lg hover:bg-grid-card transition-colors text-gray-400 hover:text-white"
@@ -688,10 +684,16 @@ function StatCard({
           <Icon className="w-4 h-4 sm:w-5 sm:h-5" />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-[10px] sm:text-xs text-gray-500 truncate">{label}</div>
-          <div className="font-mono font-semibold text-sm sm:text-base truncate">{value}</div>
+          <div className="text-[10px] sm:text-xs text-gray-500 truncate">
+            {label}
+          </div>
+          <div className="font-mono font-semibold text-sm sm:text-base truncate">
+            {value}
+          </div>
           {subtitle && (
-            <div className="text-[10px] sm:text-xs text-gray-600 mt-0.5 truncate">{subtitle}</div>
+            <div className="text-[10px] sm:text-xs text-gray-600 mt-0.5 truncate">
+              {subtitle}
+            </div>
           )}
         </div>
       </div>

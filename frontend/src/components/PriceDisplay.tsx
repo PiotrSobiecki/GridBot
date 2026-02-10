@@ -188,7 +188,7 @@ export default function PriceDisplay() {
   }, [baseAssets]); // Dodajemy baseAssets do zależności, żeby restartować po zmianie listy
 
   return (
-    <div className="flex-1 overflow-hidden relative ml-0 md:ml-[150px] mr-0 md:mr-[10px]">
+    <div className="flex-1 overflow-hidden relative">
       <div
         ref={trackRef}
         className="flex items-center gap-3 sm:gap-6 will-change-transform"

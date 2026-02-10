@@ -279,7 +279,7 @@ export default function OrderSettings({
             className="bg-transparent text-base sm:text-lg font-semibold focus:outline-none focus:border-b focus:border-emerald-500 flex-1 min-w-0"
           />
           <span
-            className={`px-2 py-1 rounded text-[10px] sm:text-xs font-medium whitespace-nowrap ${
+            className={`px-2 py-1 rounded text-[10px] sm:text-xs font-medium whitespace-nowrap mr-3 ${
               isRunning ? "status-active" : "status-inactive"
             }`}
           >

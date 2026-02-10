@@ -98,6 +98,21 @@ export class Position {
     return Position.findByWalletAndOrderId(walletAddress, orderId, PositionStatus.OPEN);
   }
 
+  /**
+   * Zwraca łączny profit ze wszystkich ZAMKNIĘTYCH pozycji
+   * dla danego portfela i zlecenia (long + short).
+   * Używane do spójnego wyliczania totalProfit w GridState.
+   */
+  static getTotalClosedProfit(walletAddress, orderId) {
+    const row = db
+      .prepare(
+        'SELECT COALESCE(SUM(profit), 0) AS total FROM positions WHERE wallet_address = ? AND order_id = ? AND status = ?'
+      )
+      .get(walletAddress, orderId, PositionStatus.CLOSED);
+
+    return row?.total ?? 0;
+  }
+
   toJSON() {
     return {
       id: this.id,

@@ -52,6 +52,60 @@ async function getSymbolPrecision(symbol) {
 }
 
 /**
+ * Sprawdza czy symbol istnieje w exchangeInfo i zwraca informacje o dostępnych symbolach
+ * @param {string} symbol - np. "XRPUSDT"
+ * @returns {Promise<{valid: boolean, symbolInfo?: object, availableSymbols?: string[], error?: string}>}
+ */
+async function validateSymbol(symbol) {
+  const now = Date.now();
+  if (
+    !exchangeInfoCache ||
+    now - exchangeInfoCacheTime > EXCHANGE_INFO_CACHE_MS
+  ) {
+    try {
+      exchangeInfoCache = await AsterSpotService.fetchExchangeInfo();
+      exchangeInfoCacheTime = now;
+    } catch (error) {
+      return {
+        valid: false,
+        error: `Failed to fetch exchangeInfo: ${error.message}`,
+      };
+    }
+  }
+
+  const upperSymbol = symbol.toUpperCase();
+  const symbolInfo = exchangeInfoCache?.symbols?.find(
+    (s) => s.symbol === upperSymbol && s.status === "TRADING"
+  );
+
+  if (symbolInfo) {
+    return { valid: true, symbolInfo };
+  }
+
+  // Jeśli symbol nie istnieje, znajdź dostępne symbole dla tego baseAsset
+  const [baseAsset, quoteAsset] = parseSymbol(symbol);
+  const availableSymbols = exchangeInfoCache?.symbols
+    ?.filter(
+      (s) =>
+        s.baseAsset === baseAsset &&
+        s.quoteAsset === quoteAsset &&
+        s.status === "TRADING"
+    )
+    .map((s) => s.symbol)
+    .slice(0, 10) || [];
+
+  return {
+    valid: false,
+    availableSymbols,
+    error: `Symbol ${upperSymbol} is not available on AsterDex Spot. ${
+      availableSymbols.length > 0
+        ? `Available symbols for ${baseAsset}/${quoteAsset}: ${availableSymbols.join(", ")}`
+        : `No trading pairs found for ${baseAsset}/${quoteAsset} on Spot.`
+    }`,
+  };
+}
+
+/**
  * Zaokrągla quantity zgodnie z stepSize z exchangeInfo
  * @param {Decimal} quantity - ilość do zaokrąglenia
  * @param {string|null} stepSize - stepSize z exchangeInfo (np. "0.00001")
@@ -123,6 +177,16 @@ export async function placeSpotBuy(
   }
 
   try {
+    // Walidacja symbolu przed wysłaniem zlecenia
+    const validation = await validateSymbol(symbol);
+    if (!validation.valid) {
+      console.error(`❌ Invalid symbol ${symbol}:`, validation.error);
+      return {
+        success: false,
+        error: validation.error || `Symbol ${symbol} is not available on AsterDex Spot`,
+      };
+    }
+
     // Realne zlecenie MARKET BUY na AsterDex
     // Dla MARKET BUY używamy quoteOrderQty (ile quote currency wydać)
     const orderParams = {
@@ -196,6 +260,16 @@ export async function placeSpotSell(
   }
 
   try {
+    // Walidacja symbolu przed wysłaniem zlecenia
+    const validation = await validateSymbol(symbol);
+    if (!validation.valid) {
+      console.error(`❌ Invalid symbol ${symbol}:`, validation.error);
+      return {
+        success: false,
+        error: validation.error || `Symbol ${symbol} is not available on AsterDex Spot`,
+      };
+    }
+
     // Pobierz precyzję dla symbolu (stepSize dla quantity)
     const precision = await getSymbolPrecision(symbol);
     const roundedQuantity = roundQuantityToStepSize(
