@@ -4,6 +4,10 @@
   "description": "Web3 SIWE Authentication & Trading Engine for GridBot",
   "main": "src/index.js",
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=9.0.0"
+  },
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js"

@@ -56,7 +56,12 @@ W projekcie Railway przejdź do **Variables** i dodaj:
 1. W projekcie Railway kliknij **"New"** → **"GitHub Repo"** (lub **"Empty Service"**)
 2. Wybierz repozytorium GridBot
 3. Ustaw **Root Directory** na `auth-service`
-4. Railway automatycznie wykryje `package.json` i wdroży
+4. Railway automatycznie wykryje `package.json` i użyje Nixpacks do budowy
+5. Projekt ma już skonfigurowane pliki:
+   - `nixpacks.toml` - konfiguracja Nixpacks
+   - `.nvmrc` - wersja Node.js (20)
+   - `railway.toml` - konfiguracja Railway
+   - `start.sh` - backup script (jeśli potrzebny)
 
 ### Opcja B: Przez Railway CLI
 ```bash

@@ -5,3 +5,7 @@ builder = "NIXPACKS"
 startCommand = "npm start"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
+
+# Upewnij się że Railway używa Node.js 20
+[build.env]
+NODE_VERSION = "20"
