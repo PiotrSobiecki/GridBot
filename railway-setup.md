@@ -55,13 +55,22 @@ W projekcie Railway przejdź do **Variables** i dodaj:
 ### Opcja A: Przez Railway Dashboard
 1. W projekcie Railway kliknij **"New"** → **"GitHub Repo"** (lub **"Empty Service"**)
 2. Wybierz repozytorium GridBot
-3. Ustaw **Root Directory** na `auth-service`
-4. Railway automatycznie wykryje `package.json` i użyje Nixpacks do budowy
+3. **WAŻNE:** W ustawieniach serwisu ustaw **Root Directory** na `auth-service`
+   - Przejdź do Settings → Service Settings → Root Directory
+   - Wpisz: `auth-service`
+   - Zapisz zmiany
+4. Railway automatycznie wykryje `package.json` w katalogu `auth-service` i użyje Nixpacks do budowy
 5. Projekt ma już skonfigurowane pliki:
-   - `nixpacks.toml` - konfiguracja Nixpacks
-   - `.nvmrc` - wersja Node.js (20)
-   - `railway.toml` - konfiguracja Railway
-   - `start.sh` - backup script (jeśli potrzebny)
+   - `auth-service/nixpacks.toml` - konfiguracja Nixpacks
+   - `auth-service/.nvmrc` - wersja Node.js (20)
+   - `auth-service/railway.toml` - konfiguracja Railway
+   - `auth-service/start.sh` - backup script
+   - `nixpacks.toml` (w głównym katalogu) - fallback jeśli Root Directory nie jest ustawione
+
+**Jeśli nadal widzisz błąd "Railpack could not determine how to build":**
+- Sprawdź czy Root Directory jest ustawione na `auth-service` (nie na `.` lub pusty)
+- Upewnij się że w Settings → Build → Builder jest ustawione na "Nixpacks" (nie Docker)
+- Sprawdź logi w Railway Dashboard → Deployments → View Logs
 
 ### Opcja B: Przez Railway CLI
 ```bash
