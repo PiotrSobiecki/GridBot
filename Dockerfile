@@ -3,11 +3,11 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Kopiuj package.json z auth-service
+# Kopiuj package.json i package-lock.json z auth-service
 COPY auth-service/package*.json ./
 
-# Zainstaluj zależności
-RUN npm ci --only=production
+# Zainstaluj zależności (używamy npm install zamiast npm ci, bo lock file może nie być zsynchronizowany)
+RUN npm install --omit=dev --prefer-offline --no-audit
 
 # Kopiuj cały katalog auth-service
 COPY auth-service/ .
