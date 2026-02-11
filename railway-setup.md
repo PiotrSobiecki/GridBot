@@ -52,24 +52,31 @@ W projekcie Railway przejdź do **Variables** i dodaj:
 
 ## Krok 5: Wdrożenie auth-service
 
-### Opcja A: Przez Railway Dashboard
+### Opcja A: Przez Railway Dashboard (Docker - zalecane)
 1. W projekcie Railway kliknij **"New"** → **"GitHub Repo"** (lub **"Empty Service"**)
 2. Wybierz repozytorium GridBot
 3. **WAŻNE:** W ustawieniach serwisu ustaw **Root Directory** na `auth-service`
    - Przejdź do Settings → Service Settings → Root Directory
    - Wpisz: `auth-service`
    - Zapisz zmiany
-4. Railway automatycznie wykryje `package.json` w katalogu `auth-service` i użyje Nixpacks do budowy
+4. **Ustaw Builder na Docker:**
+   - Przejdź do Settings → Build → Builder
+   - Wybierz **"Dockerfile"** (nie Nixpacks)
+   - Railway automatycznie użyje `auth-service/Dockerfile`
 5. Projekt ma już skonfigurowane pliki:
-   - `auth-service/nixpacks.toml` - konfiguracja Nixpacks
-   - `auth-service/.nvmrc` - wersja Node.js (20)
-   - `auth-service/railway.toml` - konfiguracja Railway
-   - `auth-service/start.sh` - backup script
-   - `nixpacks.toml` (w głównym katalogu) - fallback jeśli Root Directory nie jest ustawione
+   - `auth-service/Dockerfile` - konfiguracja Docker (Node.js 20 Alpine)
+   - `auth-service/railway.toml` - konfiguracja Railway (builder: DOCKERFILE)
+   - `auth-service/package.json` - zależności Node.js
 
-**Jeśli nadal widzisz błąd "Railpack could not determine how to build":**
-- Sprawdź czy Root Directory jest ustawione na `auth-service` (nie na `.` lub pusty)
-- Upewnij się że w Settings → Build → Builder jest ustawione na "Nixpacks" (nie Docker)
+**Uwagi dotyczące Dockera:**
+- Dockerfile używa `node:20-alpine` (lekki obraz)
+- Instaluje tylko production dependencies (`npm ci --only=production`)
+- Port 3001 jest eksponowany (Railway automatycznie mapuje PORT env)
+- Railway automatycznie ustawi zmienną `PORT` - aplikacja ją używa
+
+**Jeśli widzisz błędy:**
+- Sprawdź czy Root Directory jest ustawione na `auth-service`
+- Upewnij się że Builder to "Dockerfile" (nie Nixpacks)
 - Sprawdź logi w Railway Dashboard → Deployments → View Logs
 
 ### Opcja B: Przez Railway CLI
