@@ -15,6 +15,7 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
 
@@ -61,8 +62,41 @@ app.use(
 );
 app.use(express.json());
 app.use(cookieParser());
+
+// Konfiguracja sesji - użyj PostgreSQL store na produkcji, MemoryStore lokalnie
+async function setupSessionStore() {
+  const DATABASE_URL = process.env.DATABASE_URL;
+  
+  if (DATABASE_URL) {
+    // Produkcja - użyj PostgreSQL store
+    const PgSession = connectPgSimple(session);
+    const pgModule = await import("pg");
+    const { Pool } = pgModule.default || pgModule;
+    const pgPool = new Pool({
+      connectionString: DATABASE_URL,
+      ssl: DATABASE_URL.includes("localhost") ? false : { rejectUnauthorized: false },
+    });
+    
+    const sessionStore = new PgSession({
+      pool: pgPool,
+      tableName: "session", // tabela dla sesji w PostgreSQL
+      createTableIfMissing: true, // automatycznie utworzy tabelę jeśli nie istnieje
+    });
+    
+    console.log("✅ Using PostgreSQL session store");
+    return sessionStore;
+  } else {
+    // Lokalnie - użyj MemoryStore (dla developmentu)
+    console.log("ℹ️ Using MemoryStore for sessions (development mode)");
+    return undefined; // undefined = domyślny MemoryStore
+  }
+}
+
+const sessionStore = await setupSessionStore();
+
 app.use(
   session({
+    store: sessionStore,
     secret: process.env.JWT_SECRET || "gridbot-secret-key",
     resave: false,
     saveUninitialized: false,
