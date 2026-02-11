@@ -439,13 +439,10 @@ async function executeBuy(currentPrice, state, settings) {
     .toDecimalPlaces(AMOUNT_SCALE, Decimal.ROUND_DOWN);
 
   // Oblicz cel sprzedaży (profit na pojedynczej transakcji)
-  // Jeśli zdefiniowane są trendy, użyj procentu SELL z bieżącego trendu,
-  // w przeciwnym razie użyj globalnego minProfitPercent.
-  const hasTrendPercents =
-    settings.trendPercents && settings.trendPercents.length > 0;
-  const profitPercent = hasTrendPercents
-    ? getTrendPercent(currentTrend, settings, false) // SELL percent
-    : new Decimal(settings.minProfitPercent || 0.5);
+  // Trendy służą tylko do wyznaczania poziomów wejścia.
+  // Minimalny zarobek określa, o ile % cena musi wzrosnąć od zakupu,
+  // żeby sprzedać pozycję.
+  const profitPercent = new Decimal(settings.minProfitPercent || 0.5);
 
   const targetSellPrice = currentPrice
     .mul(Decimal.add(1, profitPercent.div(100)))
@@ -522,14 +519,14 @@ async function executeBuy(currentPrice, state, settings) {
   state.totalBoughtValue = new Decimal(state.totalBoughtValue || 0)
     .plus(transactionValue)
     .toNumber();
+  // Focus wyświetlany w UI ustawiamy na cenę ostatniego zakupu,
+  // ale dla logiki progów:
+  // - aktualizujemy tylko BUY focus (nextBuyTarget),
+  // - SELL focus (nextSellTarget) zostawiamy bez zmian,
+  //   dopóki nie wykonamy osobnej transakcji sprzedaży.
   state.currentFocusPrice = buyPriceNum;
   state.focusLastUpdated = new Date().toISOString();
   state.nextBuyTarget = calculateNextBuyTarget(
-    new Decimal(buyPriceNum),
-    state.buyTrendCounter,
-    settings,
-  ).toNumber();
-  state.nextSellTarget = calculateNextSellTarget(
     new Decimal(buyPriceNum),
     state.buyTrendCounter,
     settings,
@@ -703,14 +700,12 @@ async function executeBuySell(currentPrice, position, state, settings) {
   );
 
   // Ustaw focus na cenę sprzedaży (zawsze > 0)
+  // Po zamknięciu long:
+  // - aktualizujemy BUY focus i jego kolejne poziomy (nextBuyTarget),
+  // - SELL focus (nextSellTarget) zostawiamy – zmienia się tylko przy transakcjach SELL.
   state.currentFocusPrice = finalSellPrice;
   state.focusLastUpdated = new Date().toISOString();
   state.nextBuyTarget = nextBuyTargetForDisplay;
-  state.nextSellTarget = calculateNextSellTarget(
-    new Decimal(finalSellPrice),
-    state.buyTrendCounter,
-    settings,
-  ).toNumber();
 
   console.log(
     `🔴 SELL executed: price=${finalSellPrice}, profit=${executedProfit} trend→${state.buyTrendCounter} focus=${finalSellPrice}`,
@@ -887,13 +882,10 @@ async function executeSellShort(currentPrice, state, settings) {
   }
 
   // Cel odkupu (profit na pojedynczej transakcji short)
-  // Jeśli zdefiniowane są trendy, użyj procentu BUY z bieżącego trendu,
-  // w przeciwnym razie użyj globalnego minProfitPercent.
-  const hasTrendPercents =
-    settings.trendPercents && settings.trendPercents.length > 0;
-  const profitPercent = hasTrendPercents
-    ? getTrendPercent(currentTrend, settings, true) // BUY percent
-    : new Decimal(settings.minProfitPercent || 0.5);
+  // Trendy służą tylko do wyznaczania poziomów wejścia.
+  // Minimalny zarobek określa, o ile % cena musi spaść od sprzedaży,
+  // żeby opłacało się odkupić (zamknąć short).
+  const profitPercent = new Decimal(settings.minProfitPercent || 0.5);
 
   const targetBuybackPrice = currentPrice
     .mul(Decimal.sub(1, profitPercent.div(100)))
@@ -963,6 +955,9 @@ async function executeSellShort(currentPrice, state, settings) {
     .plus(executedValue)
     .toNumber();
   const sellPriceNum = toNum(executedPrice);
+  // Po otwarciu short:
+  // - aktualizujemy tylko SELL focus (nextSellTarget) na bazie ceny sprzedaży,
+  // - BUY focus (nextBuyTarget) pozostaje bez zmian, dopóki nie wykonamy BUY.
   state.currentFocusPrice = sellPriceNum;
   state.focusLastUpdated = new Date().toISOString();
   state.nextSellTarget = calculateNextSellTarget(
@@ -1054,6 +1049,9 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
     state.walletAddress,
     state.orderId,
   );
+  // Po zamknięciu short:
+  // - aktualizujemy tylko SELL-ową stronę progów (nextSellTarget),
+  //   BUY focus zostaje bez zmian (odpowiada za kolejne wejścia long).
   state.currentFocusPrice = buybackPriceNum;
   state.focusLastUpdated = new Date().toISOString();
   state.nextSellTarget = calculateNextSellTarget(

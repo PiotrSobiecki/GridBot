@@ -36,6 +36,10 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
     currentOrder?.quoteAsset || currentOrder?.buy?.currency || "USDT";
   const symbol = `${baseAsset}${quoteAsset}`;
   const currentPrice = prices[symbol]?.price || 0;
+  const minProfitPercent =
+    typeof currentOrder?.minProfitPercent === "number"
+      ? currentOrder.minProfitPercent
+      : 0;
 
   // Filtruj pozycje według typu i sortuj po dacie (najnowsze na górze)
   const buyPositions = orderPositions
@@ -187,7 +191,9 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                 <th className="text-right p-2 sm:p-3 font-medium hidden md:table-cell">Ilość</th>
                 <th className="text-right p-2 sm:p-3 font-medium hidden lg:table-cell">Wartość</th>
                 <th className="text-right p-2 sm:p-3 font-medium hidden lg:table-cell">
-                  {activeTab === "buy" ? "Cel sprzedaży" : "Cel odkupu"}
+                  {activeTab === "buy"
+                    ? "Cel / cena sprzedaży"
+                    : "Cel / cena zakupu"}
                 </th>
                 <th className="text-right p-2 sm:p-3 font-medium hidden md:table-cell">Trend</th>
                 <th className="text-right p-2 sm:p-3 font-medium">P&L</th>
@@ -201,10 +207,19 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                   activeTab === "buy" ? position.buyPrice : position.sellPrice;
                 const entryValue =
                   activeTab === "buy" ? position.buyValue : position.sellValue;
-                const targetPrice =
+                const isClosed = position.status === "CLOSED";
+                // Dodatkowa kolumna:
+                // - dla OTWARTYCH pozycji pokazujemy cel (targetSellPrice / targetBuybackPrice),
+                // - dla ZAMKNIĘTYCH pokazujemy rzeczywistą cenę wyjścia
+                //   (sellPrice dla kupna, buyPrice dla sprzedaży).
+                const targetOrExitPrice =
                   activeTab === "buy"
-                    ? position.targetSellPrice
-                    : position.targetBuybackPrice;
+                    ? isClosed && position.sellPrice != null
+                      ? position.sellPrice
+                      : position.targetSellPrice
+                    : isClosed && position.buyPrice != null
+                      ? position.buyPrice
+                      : position.targetBuybackPrice;
 
                 return (
                   <motion.tr
@@ -231,24 +246,29 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                         ? position.amount.toFixed(6)
                         : "—"}
                     </td>
-                    <td className="p-2 sm:p-3 text-right font-mono text-xs sm:text-sm hidden lg:table-cell">
-                      {formatPrice(entryValue)}
-                    </td>
                     <td
-                      className={`p-2 sm:p-3 text-right font-mono text-xs sm:text-sm hidden lg:table-cell ${
-                        activeTab === "buy"
-                          ? "text-emerald-400"
-                          : "text-red-400"
-                      }`}
+                      className="p-2 sm:p-3 text-right font-mono text-xs sm:text-sm hidden lg:table-cell"
                       title={
-                        activeTab === "buy" &&
-                        targetPrice != null &&
-                        targetPrice > 0
-                          ? "Cena docelowa sprzedaży (z min. % zysku)"
+                        targetOrExitPrice != null &&
+                        targetOrExitPrice > 0 &&
+                        position.status === "OPEN" &&
+                        minProfitPercent > 0
+                          ? activeTab === "buy"
+                            ? `Minimalna cena sprzedaży (min. zysk ${minProfitPercent.toFixed(
+                                2,
+                              )}%): $${targetOrExitPrice.toFixed(2)}`
+                            : `Minimalna cena zakupu przy odkupie (min. zysk ${minProfitPercent.toFixed(
+                                2,
+                              )}%): $${targetOrExitPrice.toFixed(2)}`
                           : undefined
                       }
                     >
-                      {formatPrice(targetPrice)}
+                      {formatPrice(entryValue)}
+                    </td>
+                    <td className="p-2 sm:p-3 text-right font-mono text-xs sm:text-sm hidden lg:table-cell">
+                      {targetOrExitPrice != null && targetOrExitPrice > 0
+                        ? formatPrice(targetOrExitPrice)
+                        : "—"}
                     </td>
                     <td className="p-2 sm:p-3 text-right font-mono text-xs sm:text-sm hidden md:table-cell">
                       <span

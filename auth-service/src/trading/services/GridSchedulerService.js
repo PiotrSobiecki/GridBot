@@ -34,12 +34,15 @@ export function start() {
     return;
   }
 
-  schedulerTask = cron.schedule(CRON_EXPRESSION, () => {
+  // Używamy async callbacka i czekamy na zakończenie processActiveOrders,
+  // żeby nie uruchomić kilku cykli jednocześnie (co mogło powodować
+  // podwójne zakupy / sprzedaże przy jednym ticku ceny).
+  schedulerTask = cron.schedule(CRON_EXPRESSION, async () => {
     if (isProcessing) return;
 
+    isProcessing = true;
     try {
-      isProcessing = true;
-      processActiveOrders();
+      await processActiveOrders();
     } catch (error) {
       console.error("❌ Scheduler error:", error.message);
     } finally {
