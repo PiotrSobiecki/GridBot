@@ -58,21 +58,29 @@ export default function OrderSettings({
   const [quoteAssets, setQuoteAssets] = useState<string[]>(["USDT"]);
 
   // Synchronizuj localOrder z prop order (np. przy przełączeniu zakładki)
+  // Uwaga: synchronizujemy tylko gdy order._id się zmienia (nowe zlecenie),
+  // żeby nie nadpisywać zmian użytkownika podczas edycji
   useEffect(() => {
-    setLocalOrder(order);
-  }, [order?._id, order?.focusPrice, order?.refreshInterval, order?.name]);
+    if (order?._id && order._id !== localOrder?._id) {
+      setLocalOrder(order);
+    }
+  }, [order?._id]);
 
   // Utrzymuj spójność walut kupna/sprzedaży z wybraną parą BASE/QUOTE
+  // Tylko synchronizuj sell.currency i buy.currency gdy baseAsset/quoteAsset się zmienia
+  // NIE nadpisuj baseAsset/quoteAsset gdy użytkownik je zmienia ręcznie
   useEffect(() => {
     setLocalOrder((prev) => {
       if (!prev) return prev;
       let changed = false;
       const next: any = { ...prev };
 
+      // Synchronizuj sell.currency tylko jeśli baseAsset jest ustawione i różne od sell.currency
       if (prev.baseAsset && prev.sell?.currency !== prev.baseAsset) {
         next.sell = { ...prev.sell, currency: prev.baseAsset };
         changed = true;
       }
+      // Synchronizuj buy.currency tylko jeśli quoteAsset jest ustawione i różne od buy.currency
       if (prev.quoteAsset && prev.buy?.currency !== prev.quoteAsset) {
         next.buy = { ...prev.buy, currency: prev.quoteAsset };
         changed = true;
@@ -82,34 +90,10 @@ export default function OrderSettings({
     });
   }, [localOrder.baseAsset, localOrder.quoteAsset]);
 
-  // Pobierz listę dostępnych kryptowalut z AsterDex API i przefiltruj do dozwolonych
-  useEffect(() => {
-    // Załaduj listę par z backendu (AsterDex) i przefiltruj do dozwolonych
-    api
-      .getAsterSymbols()
-      .then((data) => {
-        if (Array.isArray(data.baseAssets) && data.baseAssets.length > 0) {
-          // Filtruj tylko do dozwolonych kryptowalut
-          const filtered = data.baseAssets.filter((asset: string) =>
-            ALLOWED_BASE_ASSETS.includes(asset.toUpperCase())
-          );
-          // Sortuj zgodnie z kolejnością w ALLOWED_BASE_ASSETS
-          const sorted = ALLOWED_BASE_ASSETS.filter((allowed) =>
-            filtered.includes(allowed.toUpperCase())
-          );
-          if (sorted.length > 0) {
-            setBaseAssets(sorted);
-          }
-        }
-        if (Array.isArray(data.quoteAssets) && data.quoteAssets.length > 0) {
-          setQuoteAssets(data.quoteAssets);
-        }
-      })
-      .catch((err: any) => {
-        console.error("Failed to load Aster symbols:", err);
-        // W przypadku błędu użyj domyślnej listy (już ustawionej w useState)
-      });
-  }, []);
+  // Na razie nie pobieramy listy krypto z API – UI ma mieć
+  // sztywną, krótką listę: ASTER, BTC, ETH, BNB.
+  // Jeśli kiedyś będziemy chcieli rozszerzyć listę dynamicznie,
+  // można tu wrócić do api.getAsterSymbols() i filtrowania.
 
   const toggleSection = (section: Section) => {
     const newSections = new Set(expandedSections);
@@ -127,11 +111,15 @@ export default function OrderSettings({
     let current = newOrder;
 
     for (let i = 0; i < keys.length - 1; i++) {
+      if (!current[keys[i]]) {
+        current[keys[i]] = {};
+      }
       current[keys[i]] = { ...current[keys[i]] };
       current = current[keys[i]];
     }
     current[keys[keys.length - 1]] = value;
 
+    console.log(`🔄 updateField: ${path} = ${value}`, newOrder);
     setLocalOrder(newOrder);
   };
 
@@ -145,8 +133,6 @@ export default function OrderSettings({
   };
 
   const handleSave = async () => {
-    if (!order._id) return;
-
     setIsSaving(true);
     try {
       // Sanitizacja pól, które mogą mieć chwilowo pusty string z inputów
@@ -172,28 +158,40 @@ export default function OrderSettings({
         },
       };
 
-      await api.updateOrder(order._id, sanitizedOrder);
+      // Jeśli zlecenie nie ma jeszcze _id => tworzymy je w bazie
+      const savedOrder = order._id
+        ? await api.updateOrder(order._id, sanitizedOrder)
+        : await api.createOrder(sanitizedOrder);
 
       // Pobierz świeże dane z backendu po zapisaniu
       const freshSettings = await api.getSettings();
       if (freshSettings) {
         setUserSettings(freshSettings);
-        // Zaktualizuj lokalny stan zlecenia - użyj sanitizedOrder (zapisanego) jako bazę
-        const freshOrder = freshSettings.orders?.find(
-          (o: any) => (o._id || o.id) === order._id
-        );
-        // Aktualizuj localOrder z zapisanymi danymi (sanitizedOrder ma wszystkie pola z formularza)
+
+        const targetId =
+          order._id || savedOrder?._id || (savedOrder as any)?.id;
+
+        const freshOrder = targetId
+          ? freshSettings.orders?.find(
+              (o: any) => (o._id || o.id) === targetId
+            )
+          : null;
+
         const updatedLocalOrder = freshOrder
-          ? { ...sanitizedOrder, ...freshOrder, _id: order._id }
-          : { ...sanitizedOrder, _id: order._id };
+          ? { ...sanitizedOrder, ...freshOrder, _id: targetId }
+          : { ...sanitizedOrder, _id: targetId };
+
         setLocalOrder(updatedLocalOrder);
 
         // Odśwież też stan gridu (gridState) żeby "Cena Focus" na górze się zaktualizowała
-        if (walletAddress && order._id) {
+        if (walletAddress && targetId) {
           try {
-            const freshGridState = await api.getGridState(walletAddress, order._id);
+            const freshGridState = await api.getGridState(
+              walletAddress,
+              targetId
+            );
             if (freshGridState) {
-              setGridState(order._id, freshGridState);
+              setGridState(targetId, freshGridState);
             }
           } catch (err) {
             // Cicho ignoruj jeśli grid jeszcze nie istnieje
@@ -201,11 +199,20 @@ export default function OrderSettings({
         }
       } else if (userSettings) {
         // Fallback: aktualizuj lokalnie jeśli pobranie z backendu nie powiodło się
-        const updatedOrders = userSettings.orders.map((o) =>
-          o._id === order._id ? { ...sanitizedOrder, _id: order._id } : o
-        );
-        setUserSettings({ ...userSettings, orders: updatedOrders });
-        setLocalOrder({ ...sanitizedOrder, _id: order._id });
+        if (order._id) {
+          const updatedOrders = userSettings.orders.map((o) =>
+            o._id === order._id ? { ...sanitizedOrder, _id: order._id } : o
+          );
+          setUserSettings({ ...userSettings, orders: updatedOrders });
+          setLocalOrder({ ...sanitizedOrder, _id: order._id });
+        } else if (savedOrder) {
+          const targetId = (savedOrder as any)._id || (savedOrder as any).id;
+          setUserSettings({
+            ...userSettings,
+            orders: [...userSettings.orders, { ...sanitizedOrder, _id: targetId }],
+          });
+          setLocalOrder({ ...sanitizedOrder, _id: targetId });
+        }
       }
 
       toast.success("Zapisano ustawienia");
@@ -426,11 +433,14 @@ export default function OrderSettings({
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
               <SelectField
                 label="5. Krypto (BASE)"
-                value={localOrder.baseAsset || localOrder.sell.currency}
+                value={localOrder.baseAsset || localOrder.sell?.currency || "BTC"}
                 options={baseAssets}
                 onChange={(v) => {
-                  updateField("baseAsset", v);
-                  updateField("sell.currency", v);
+                  console.log("🔄 BaseAsset changed:", v, "Available options:", baseAssets);
+                  if (v) {
+                    updateField("baseAsset", v);
+                    updateField("sell.currency", v);
+                  }
                 }}
               />
               <SelectField
@@ -1328,19 +1338,25 @@ function SelectField({
 }) {
   // Upewnij się że value jest w opcjach, jeśli nie - dodaj jako pierwszą opcję
   const validOptions = [...options];
-  if (value && !validOptions.some(opt => {
+  const currentValue = value || "";
+  if (currentValue && !validOptions.some(opt => {
     const optValue = typeof opt === "string" ? opt : opt.value;
-    return optValue === value;
+    return optValue === currentValue;
   })) {
-    validOptions.unshift(value);
+    validOptions.unshift(currentValue);
   }
 
   return (
     <div>
       <label className="block text-xs text-gray-500 mb-1">{label}</label>
       <select
-        value={value || ""}
-        onChange={(e) => onChange(e.target.value)}
+        value={currentValue}
+        onChange={(e) => {
+          const newValue = e.target.value;
+          if (newValue) {
+            onChange(newValue);
+          }
+        }}
         className="w-full px-3 py-2 bg-grid-bg border border-grid-border rounded-lg text-sm focus:outline-none focus:border-emerald-500"
       >
         {validOptions.length === 0 ? (
