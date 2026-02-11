@@ -45,7 +45,7 @@ function toNum(v) {
 /**
  * Inicjalizuje stan GRID dla nowego zlecenia
  */
-export function initializeGridState(walletAddress, settings) {
+export async function initializeGridState(walletAddress, settings) {
   const focusPrice = new Decimal(settings.focusPrice || 0);
 
   const state = new GridState({
@@ -68,7 +68,7 @@ export function initializeGridState(walletAddress, settings) {
     createdAt: new Date().toISOString(),
   });
 
-  return state.save();
+  return await state.save();
 }
 
 /**
@@ -80,7 +80,7 @@ export async function processPrice(
   currentPrice,
   settings,
 ) {
-  const state = GridState.findByWalletAndOrderId(walletAddress, orderId);
+  const state = await GridState.findByWalletAndOrderId(walletAddress, orderId);
 
   if (!state) {
     console.warn(
@@ -98,7 +98,7 @@ export async function processPrice(
   state.lastPriceUpdate = new Date().toISOString();
 
   // #1.4 Sprawdź czas do nowego focus
-  checkAndUpdateFocusTime(state, price, settings);
+  await checkAndUpdateFocusTime(state, price, settings);
 
   // Sprawdź warunki kupna
   if (shouldBuy(price, state, settings)) {
@@ -117,7 +117,7 @@ export async function processPrice(
   await checkAndExecuteSellBuybacks(price, state, settings);
 
   state.lastUpdated = new Date().toISOString();
-  state.save();
+  await state.save();
 
   return state;
 }
@@ -125,7 +125,7 @@ export async function processPrice(
 /**
  * #1.4 Sprawdza i aktualizuje focus na podstawie czasu
  */
-function checkAndUpdateFocusTime(state, currentPrice, settings) {
+async function checkAndUpdateFocusTime(state, currentPrice, settings) {
   const timeToNewFocus = settings.timeToNewFocus || 0;
 
   if (timeToNewFocus <= 0) return;
@@ -149,6 +149,7 @@ function checkAndUpdateFocusTime(state, currentPrice, settings) {
           0,
           settings,
         ).toNumber();
+        await state.save();
       }
     }
   }
@@ -509,7 +510,7 @@ async function executeBuy(currentPrice, state, settings) {
     targetSellPrice: toNum(targetSellPrice),
     status: PositionStatus.OPEN,
   });
-  position.save();
+  await position.save();
 
   // Aktualizuj stan: focus = cena ostatniego zakupu, trend 0→1→2→… do max z trendPercents
   state.openPositionIds.push(position.id);
@@ -544,7 +545,7 @@ async function executeBuy(currentPrice, state, settings) {
 async function checkAndExecuteBuySells(currentPrice, state, settings) {
   if (!state.openPositionIds || state.openPositionIds.length === 0) return;
 
-  const positions = Position.findByIds(state.openPositionIds);
+  const positions = await Position.findByIds(state.openPositionIds);
 
   // Sortuj po cenie docelowej
   positions.sort((a, b) => (a.targetSellPrice || 0) - (b.targetSellPrice || 0));
@@ -638,7 +639,7 @@ async function executeBuySell(currentPrice, position, state, settings) {
   position.profit = executedProfit.toNumber();
   position.status = PositionStatus.CLOSED;
   position.closedAt = new Date().toISOString();
-  position.save();
+  await position.save();
 
   // Utwórz nową pozycję typu SELL w historii sprzedaży (z celem następnego zakupu w UI)
   const now = new Date().toISOString();
@@ -660,7 +661,7 @@ async function executeBuySell(currentPrice, position, state, settings) {
     trendAtBuy: position.trendAtBuy || 0, // Trend z pozycji zakupu dla referencji
     targetBuybackPrice: nextBuyTargetForDisplay, // Następny cel zakupu (do kolumny "Cel odkupu")
   });
-  sellPosition.save();
+  await sellPosition.save();
 
   console.log(
     `📝 Created SELL position in history: id=${
@@ -671,7 +672,7 @@ async function executeBuySell(currentPrice, position, state, settings) {
   );
 
   // Weryfikacja: sprawdź czy pozycja została zapisana
-  const verifyPosition = Position.findById(sellPosition.id);
+  const verifyPosition = await Position.findById(sellPosition.id);
   if (!verifyPosition) {
     console.error(
       `❌ ERROR: SELL position ${sellPosition.id} was not saved to database!`,
@@ -694,7 +695,7 @@ async function executeBuySell(currentPrice, position, state, settings) {
   // Przelicz łączny profit na podstawie wszystkich ZAMKNIĘTYCH pozycji
   // (long + short) dla danego zlecenia – dzięki temu Total Profit w UI
   // zawsze odpowiada sumie z tabeli zamkniętych pozycji.
-  state.totalProfit = Position.getTotalClosedProfit(
+  state.totalProfit = await Position.getTotalClosedProfit(
     state.walletAddress,
     state.orderId,
   );
@@ -945,7 +946,7 @@ async function executeSellShort(currentPrice, state, settings) {
     targetBuybackPrice: targetBuybackPrice.toNumber(),
     status: PositionStatus.OPEN,
   });
-  position.save();
+  await position.save();
 
   state.openSellPositionIds.push(position.id);
   const maxTrend = getMaxTrend(settings);
@@ -978,7 +979,7 @@ async function checkAndExecuteSellBuybacks(currentPrice, state, settings) {
   if (!state.openSellPositionIds || state.openSellPositionIds.length === 0)
     return;
 
-  const positions = Position.findByIds(state.openSellPositionIds);
+  const positions = await Position.findByIds(state.openSellPositionIds);
 
   for (const position of positions) {
     if (position.status !== PositionStatus.OPEN) continue;
@@ -1034,7 +1035,7 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
   position.profit = executedProfit.toNumber();
   position.status = PositionStatus.CLOSED;
   position.closedAt = new Date().toISOString();
-  position.save();
+  await position.save();
 
   state.openSellPositionIds = state.openSellPositionIds.filter(
     (id) => id !== position.id,
@@ -1045,7 +1046,7 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
     .plus(executedBuybackValue)
     .toNumber();
   // Spójne przeliczenie totalProfit na podstawie zamkniętych pozycji
-  state.totalProfit = Position.getTotalClosedProfit(
+  state.totalProfit = await Position.getTotalClosedProfit(
     state.walletAddress,
     state.orderId,
   );
@@ -1256,45 +1257,45 @@ function matchesThreshold(price, threshold) {
 /**
  * Pobiera stan GRID
  */
-export function getGridState(walletAddress, orderId) {
-  return GridState.findByWalletAndOrderId(walletAddress, orderId);
+export async function getGridState(walletAddress, orderId) {
+  return await GridState.findByWalletAndOrderId(walletAddress, orderId);
 }
 
 /**
  * Pobiera otwarte pozycje
  */
-export function getOpenPositions(walletAddress, orderId) {
-  return Position.findOpenByWalletAndOrderId(walletAddress, orderId);
+export async function getOpenPositions(walletAddress, orderId) {
+  return await Position.findByWalletAndOrderId(walletAddress, orderId, PositionStatus.OPEN);
 }
 
 /**
  * Pobiera wszystkie pozycje (OPEN i CLOSED) dla historii
  */
-export function getAllPositions(walletAddress, orderId) {
-  return Position.findByWalletAndOrderId(walletAddress, orderId);
+export async function getAllPositions(walletAddress, orderId) {
+  return await Position.findByWalletAndOrderId(walletAddress, orderId);
 }
 
 /**
  * Zatrzymuje GRID
  */
-export function stopGrid(walletAddress, orderId) {
-  const state = GridState.findByWalletAndOrderId(walletAddress, orderId);
+export async function stopGrid(walletAddress, orderId) {
+  const state = await GridState.findByWalletAndOrderId(walletAddress, orderId);
   if (state) {
     state.isActive = false;
     state.lastUpdated = new Date().toISOString();
-    state.save();
+    await state.save();
   }
 }
 
 /**
  * Uruchamia GRID
  */
-export function startGrid(walletAddress, orderId) {
-  const state = GridState.findByWalletAndOrderId(walletAddress, orderId);
+export async function startGrid(walletAddress, orderId) {
+  const state = await GridState.findByWalletAndOrderId(walletAddress, orderId);
   if (state) {
     state.isActive = true;
     state.lastUpdated = new Date().toISOString();
-    state.save();
+    await state.save();
   }
 }
 

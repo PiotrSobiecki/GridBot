@@ -70,23 +70,23 @@ router.post('/verify', async (req, res) => {
 
     const walletAddress = fields.data.address.toLowerCase();
 
-    // Znajdź lub utwórz użytkownika (SQLite - synchroniczne)
-    let user = User.findOne({ walletAddress });
+    // Znajdź lub utwórz użytkownika
+    let user = await User.findOne({ walletAddress });
     
     if (!user) {
       user = new User({
         walletAddress,
         nonce: generateNonce()
       });
-      user.save();
+      await user.save();
       
       // Utwórz domyślne ustawienia dla nowego użytkownika
       const settings = new UserSettings({ walletAddress });
-      settings.save();
+      await settings.save();
     } else {
       user.lastLogin = new Date().toISOString();
       user.nonce = generateNonce();
-      user.save();
+      await user.save();
     }
 
     // Generuj JWT token

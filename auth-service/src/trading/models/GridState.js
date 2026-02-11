@@ -38,7 +38,7 @@ export class GridState {
     }
   }
 
-  save() {
+  async save() {
     const now = new Date().toISOString();
     this.lastUpdated = now;
     if (!this.createdAt) this.createdAt = now;
@@ -54,7 +54,7 @@ export class GridState {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(
+    await stmt.run(
       this.id,
       this.walletAddress,
       this.orderId,
@@ -81,21 +81,23 @@ export class GridState {
     return this;
   }
 
-  static findByWalletAndOrderId(walletAddress, orderId) {
-    const row = db.prepare(
+  static async findByWalletAndOrderId(walletAddress, orderId) {
+    const stmt = db.prepare(
       'SELECT * FROM grid_states WHERE wallet_address = ? AND order_id = ?'
-    ).get(walletAddress, orderId);
-    
+    );
+    const row = await stmt.get(walletAddress, orderId);
     return row ? new GridState(row) : null;
   }
 
-  static findAllActive() {
-    const rows = db.prepare('SELECT * FROM grid_states WHERE is_active = 1').all();
+  static async findAllActive() {
+    const stmt = db.prepare('SELECT * FROM grid_states WHERE is_active = 1');
+    const rows = await stmt.all();
     return rows.map(row => new GridState(row));
   }
 
-  static findAllByWallet(walletAddress) {
-    const rows = db.prepare('SELECT * FROM grid_states WHERE wallet_address = ?').all(walletAddress);
+  static async findAllByWallet(walletAddress) {
+    const stmt = db.prepare('SELECT * FROM grid_states WHERE wallet_address = ?');
+    const rows = await stmt.all(walletAddress);
     return rows.map(row => new GridState(row));
   }
 

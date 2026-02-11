@@ -35,7 +35,7 @@ export class Position {
     this.closedAt = data.closedAt || data.closed_at;
   }
 
-  save() {
+  async save() {
     const now = new Date().toISOString();
     if (!this.createdAt) this.createdAt = now;
 
@@ -47,7 +47,7 @@ export class Position {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(
+    await stmt.run(
       this.id,
       this.walletAddress,
       this.orderId,
@@ -69,19 +69,21 @@ export class Position {
     return this;
   }
 
-  static findById(id) {
-    const row = db.prepare('SELECT * FROM positions WHERE id = ?').get(id);
+  static async findById(id) {
+    const stmt = db.prepare('SELECT * FROM positions WHERE id = ?');
+    const row = await stmt.get(id);
     return row ? new Position(row) : null;
   }
 
-  static findByIds(ids) {
+  static async findByIds(ids) {
     if (!ids || ids.length === 0) return [];
     const placeholders = ids.map(() => '?').join(',');
-    const rows = db.prepare(`SELECT * FROM positions WHERE id IN (${placeholders})`).all(...ids);
+    const stmt = db.prepare(`SELECT * FROM positions WHERE id IN (${placeholders})`);
+    const rows = await stmt.all(...ids);
     return rows.map(row => new Position(row));
   }
 
-  static findByWalletAndOrderId(walletAddress, orderId, status = null) {
+  static async findByWalletAndOrderId(walletAddress, orderId, status = null) {
     let query = 'SELECT * FROM positions WHERE wallet_address = ? AND order_id = ?';
     const params = [walletAddress, orderId];
     
@@ -89,8 +91,9 @@ export class Position {
       query += ' AND status = ?';
       params.push(status);
     }
-    
-    const rows = db.prepare(query).all(...params);
+
+    const stmt = db.prepare(query);
+    const rows = await stmt.all(...params);
     return rows.map(row => new Position(row));
   }
 
@@ -103,13 +106,11 @@ export class Position {
    * dla danego portfela i zlecenia (long + short).
    * Używane do spójnego wyliczania totalProfit w GridState.
    */
-  static getTotalClosedProfit(walletAddress, orderId) {
-    const row = db
-      .prepare(
-        'SELECT COALESCE(SUM(profit), 0) AS total FROM positions WHERE wallet_address = ? AND order_id = ? AND status = ?'
-      )
-      .get(walletAddress, orderId, PositionStatus.CLOSED);
-
+  static async getTotalClosedProfit(walletAddress, orderId) {
+    const stmt = db.prepare(
+      'SELECT COALESCE(SUM(profit), 0) AS total FROM positions WHERE wallet_address = ? AND order_id = ? AND status = ?'
+    );
+    const row = await stmt.get(walletAddress, orderId, PositionStatus.CLOSED);
     return row?.total ?? 0;
   }
 

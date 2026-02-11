@@ -30,7 +30,7 @@ router.post("/grid/init", async (req, res) => {
       `🚀 Initializing GRID for wallet ${walletAddress} with order ${settings.id}`
     );
 
-    const state = GridAlgorithmService.initializeGridState(
+    const state = await GridAlgorithmService.initializeGridState(
       walletAddress,
       settings
     );
@@ -44,7 +44,7 @@ router.post("/grid/init", async (req, res) => {
 /**
  * Pobiera stan algorytmu GRID
  */
-router.get("/grid/state/:orderId", (req, res) => {
+router.get("/grid/state/:orderId", async (req, res) => {
   try {
     const walletAddress = req.headers["x-wallet-address"];
     const { orderId } = req.params;
@@ -53,7 +53,7 @@ router.get("/grid/state/:orderId", (req, res) => {
       return res.status(400).json({ error: "Missing X-Wallet-Address header" });
     }
 
-    const state = GridAlgorithmService.getGridState(walletAddress, orderId);
+    const state = await GridAlgorithmService.getGridState(walletAddress, orderId);
 
     if (!state) {
       return res.status(404).json({ error: "Grid state not found" });
@@ -69,7 +69,7 @@ router.get("/grid/state/:orderId", (req, res) => {
 /**
  * Pobiera wszystkie stany GRID dla portfela
  */
-router.get("/grid/states", (req, res) => {
+router.get("/grid/states", async (req, res) => {
   try {
     const walletAddress = req.headers["x-wallet-address"];
 
@@ -77,8 +77,8 @@ router.get("/grid/states", (req, res) => {
       return res.status(400).json({ error: "Missing X-Wallet-Address header" });
     }
 
-    const { GridState } = require("../trading/models/GridState.js");
-    const states = GridState.findAllByWallet(walletAddress);
+    const { GridState } = await import("../trading/models/GridState.js");
+    const states = await GridState.findAllByWallet(walletAddress);
 
     res.json(states.map((s) => s.toJSON()));
   } catch (error) {
@@ -90,7 +90,7 @@ router.get("/grid/states", (req, res) => {
 /**
  * Uruchamia algorytm GRID
  */
-router.post("/grid/start/:orderId", (req, res) => {
+router.post("/grid/start/:orderId", async (req, res) => {
   try {
     const walletAddress = req.headers["x-wallet-address"];
     const { orderId } = req.params;
@@ -102,7 +102,7 @@ router.post("/grid/start/:orderId", (req, res) => {
     console.log(
       `▶️ Starting GRID for wallet ${walletAddress} order ${orderId}`
     );
-    GridAlgorithmService.startGrid(walletAddress, orderId);
+    await GridAlgorithmService.startGrid(walletAddress, orderId);
     res.json({ success: true });
   } catch (error) {
     console.error("Error starting grid:", error);
@@ -113,7 +113,7 @@ router.post("/grid/start/:orderId", (req, res) => {
 /**
  * Zatrzymuje algorytm GRID
  */
-router.post("/grid/stop/:orderId", (req, res) => {
+router.post("/grid/stop/:orderId", async (req, res) => {
   try {
     const walletAddress = req.headers["x-wallet-address"];
     const { orderId } = req.params;
@@ -125,7 +125,7 @@ router.post("/grid/stop/:orderId", (req, res) => {
     console.log(
       `⏹️ Stopping GRID for wallet ${walletAddress} order ${orderId}`
     );
-    GridAlgorithmService.stopGrid(walletAddress, orderId);
+    await GridAlgorithmService.stopGrid(walletAddress, orderId);
     res.json({ success: true });
   } catch (error) {
     console.error("Error stopping grid:", error);
@@ -136,7 +136,7 @@ router.post("/grid/stop/:orderId", (req, res) => {
 /**
  * Pobiera wszystkie pozycje (OPEN i CLOSED) dla zlecenia - do wyświetlania historii
  */
-router.get("/positions/:orderId", (req, res) => {
+router.get("/positions/:orderId", async (req, res) => {
   try {
     const walletAddress = req.headers["x-wallet-address"];
     const { orderId } = req.params;
@@ -146,7 +146,7 @@ router.get("/positions/:orderId", (req, res) => {
     }
 
     // Zwróć wszystkie pozycje (OPEN i CLOSED) dla historii
-    const positions = GridAlgorithmService.getAllPositions(
+    const positions = await GridAlgorithmService.getAllPositions(
       walletAddress,
       orderId
     );
@@ -310,14 +310,14 @@ router.post("/grid/process-price/:orderId", async (req, res) => {
       return res.status(400).json({ error: "Missing X-Wallet-Address header" });
     }
 
-    GridAlgorithmService.processPrice(
+    await GridAlgorithmService.processPrice(
       walletAddress,
       orderId,
       new Decimal(price),
       settings
     );
 
-    const state = GridAlgorithmService.getGridState(walletAddress, orderId);
+    const state = await GridAlgorithmService.getGridState(walletAddress, orderId);
     res.json(state ? state.toJSON() : null);
   } catch (error) {
     console.error("Error processing price:", error);

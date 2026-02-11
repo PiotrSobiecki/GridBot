@@ -85,7 +85,7 @@ function getMinRefreshIntervalSec(activeStates) {
  * Odświeża ceny z Aster tylko co min(refreshInterval) aktywnych zleceń – żeby „Odświeżanie” w UI (np. 60 s) miało sens.
  */
 async function processActiveOrders() {
-  const activeStates = GridState.findAllActive();
+  const activeStates = await GridState.findAllActive();
 
   const minRefreshSec = getMinRefreshIntervalSec(activeStates);
   const now = Date.now();
@@ -113,7 +113,7 @@ async function processActiveOrders() {
  */
 async function processOrder(state) {
   // Pobierz ustawienia zlecenia
-  const settings = getOrderSettings(state.walletAddress, state.orderId);
+  const settings = await getOrderSettings(state.walletAddress, state.orderId);
 
   if (!settings) {
     console.warn(`⚠️ Settings not found for order ${state.orderId}`);
@@ -181,9 +181,9 @@ async function processOrder(state) {
 /**
  * Pobiera ustawienia zlecenia z SQLite
  */
-function getOrderSettings(walletAddress, orderId) {
+async function getOrderSettings(walletAddress, orderId) {
   try {
-    const userSettings = UserSettings.findOne({
+    const userSettings = await UserSettings.findOne({
       walletAddress: walletAddress.toLowerCase(),
     });
 

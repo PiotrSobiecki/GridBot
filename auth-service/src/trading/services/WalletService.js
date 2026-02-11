@@ -167,7 +167,7 @@ export async function syncBalances(walletAddress, externalBalances) {
   // Zapisz do bazy danych (UserSettings) - dynamiczny import żeby uniknąć circular dependency
   try {
     const { default: UserSettings } = await import("../models/UserSettings.js");
-    let settings = UserSettings.findOne({ walletAddress: wallet });
+    let settings = await UserSettings.findOne({ walletAddress: wallet });
     
     if (!settings) {
       settings = new UserSettings({ walletAddress: wallet });
@@ -181,7 +181,7 @@ export async function syncBalances(walletAddress, externalBalances) {
     }));
 
     settings.wallet = walletArray;
-    settings.save();
+    await settings.save();
     console.log(`💾 Saved wallet to database for ${walletAddress}`);
   } catch (error) {
     console.error(`❌ Failed to save wallet to database:`, error.message);

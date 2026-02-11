@@ -8,11 +8,11 @@ const FUTURES_BASE_URL = "https://fapi.asterdex.com";
 const SPOT_BASE_URL = "https://sapi.asterdex.com";
 
 // Funkcja do pobierania kluczy API (najpierw z bazy per portfel, potem z .env)
-function getApiKeys(walletAddress) {
+async function getApiKeys(walletAddress) {
   // 1) Spróbuj z bazy (apiConfig.aster) dla danego portfela
   if (walletAddress) {
     try {
-      const settings = UserSettings.findOne({
+      const settings = await UserSettings.findOne({
         walletAddress: walletAddress.toLowerCase(),
       });
       const apiConfig = settings?.apiConfig || {};
@@ -54,9 +54,9 @@ function getApiKeys(walletAddress) {
 
 // Sprawdź klucze przy pierwszym użyciu (po załadowaniu .env, bez portfela)
 let keysChecked = false;
-function checkKeysOnce() {
+async function checkKeysOnce() {
   if (!keysChecked) {
-    const { API_KEY, API_SECRET } = getApiKeys(null);
+    const { API_KEY, API_SECRET } = await getApiKeys(null);
     if (API_KEY && API_SECRET) {
       console.log(
         "✅ AsterSpotService: API keys loaded successfully (signed endpoints enabled)"
@@ -85,7 +85,7 @@ async function httpRequest(
   } = {}
 ) {
   // Sprawdź klucze przy pierwszym użyciu (po załadowaniu .env)
-  checkKeysOnce();
+  await checkKeysOnce();
 
   // Użyj futures API jeśli zaznaczone (dla cen), w przeciwnym razie spot API
   const baseUrl = useFutures ? FUTURES_BASE_URL : SPOT_BASE_URL;
@@ -106,7 +106,7 @@ async function httpRequest(
   });
 
   if (signed) {
-    const { API_KEY, API_SECRET } = getApiKeys(walletAddress);
+    const { API_KEY, API_SECRET } = await getApiKeys(walletAddress);
     if (!API_SECRET) {
       throw new Error("API_KEY_SECRET_ASTER not set - cannot sign request");
     }
@@ -123,7 +123,7 @@ async function httpRequest(
 
   const headers = {};
   if (signed) {
-    const { API_KEY } = getApiKeys(walletAddress);
+    const { API_KEY } = await getApiKeys(walletAddress);
     if (API_KEY) {
       headers["X-MBX-APIKEY"] = API_KEY;
     }

@@ -1,27 +1,29 @@
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 
-// Initialize user_settings table
-db.exec(`
-  CREATE TABLE IF NOT EXISTS user_settings (
-    id TEXT PRIMARY KEY,
-    wallet_address TEXT UNIQUE NOT NULL,
-    wallet_currencies TEXT DEFAULT '[]',
-    orders TEXT DEFAULT '[]',
-    api_config TEXT DEFAULT '{}',
-    created_at TEXT,
-    updated_at TEXT
-  );
-  
-  CREATE INDEX IF NOT EXISTS idx_user_settings_wallet ON user_settings(wallet_address);
-`);
+// Initialize user_settings table (SQLite) lub Postgres (db.exec jest async/sync-aware)
+(async () => {
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS user_settings (
+      id TEXT PRIMARY KEY,
+      wallet_address TEXT UNIQUE NOT NULL,
+      wallet_currencies TEXT DEFAULT '[]',
+      orders TEXT DEFAULT '[]',
+      api_config TEXT DEFAULT '{}',
+      created_at TEXT,
+      updated_at TEXT
+    );
+    
+    CREATE INDEX IF NOT EXISTS idx_user_settings_wallet ON user_settings(wallet_address);
+  `);
 
-// Best-effort migration: dodaj kolumnę api_config jeśli jej brakuje (dla starych baz)
-try {
-  db.exec("ALTER TABLE user_settings ADD COLUMN api_config TEXT DEFAULT '{}';");
-} catch (e) {
-  // Ignoruj jeśli kolumna już istnieje
-}
+  // Best-effort migration: dodaj kolumnę api_config jeśli jej brakuje (dla starych baz)
+  try {
+    await db.exec("ALTER TABLE user_settings ADD COLUMN api_config TEXT DEFAULT '{}';");
+  } catch (e) {
+    // Ignoruj jeśli kolumna już istnieje
+  }
+})();
 
 /**
  * UserSettings model - SQLite version
@@ -135,7 +137,7 @@ export class UserSettings {
     }
   }
 
-  save() {
+  async save() {
     const now = new Date().toISOString();
     this.updatedAt = now;
     if (!this.createdAt) this.createdAt = now;
@@ -145,7 +147,7 @@ export class UserSettings {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(
+    await stmt.run(
       this.id,
       this.walletAddress,
       JSON.stringify(this.wallet),
@@ -158,15 +160,17 @@ export class UserSettings {
     return this;
   }
 
-  static findOne({ walletAddress }) {
-    const row = db
-      .prepare("SELECT * FROM user_settings WHERE wallet_address = ?")
-      .get(walletAddress?.toLowerCase());
+  static async findOne({ walletAddress }) {
+    const stmt = db.prepare(
+      "SELECT * FROM user_settings WHERE wallet_address = ?"
+    );
+    const row = await stmt.get(walletAddress?.toLowerCase());
     return row ? new UserSettings(row) : null;
   }
 
-  static findById(id) {
-    const row = db.prepare("SELECT * FROM user_settings WHERE id = ?").get(id);
+  static async findById(id) {
+    const stmt = db.prepare("SELECT * FROM user_settings WHERE id = ?");
+    const row = await stmt.get(id);
     return row ? new UserSettings(row) : null;
   }
 }

@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { X, KeyRound, UserCircle2 } from "lucide-react";
+import {
+  X,
+  KeyRound,
+  UserCircle2,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
 import toast from "react-hot-toast";
 import { api } from "../api";
 
@@ -20,6 +27,7 @@ export default function SettingsApiPanel({ onClose, onChanged }: Props) {
   const [hasKeys, setHasKeys] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [showInstructions, setShowInstructions] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -99,7 +107,8 @@ export default function SettingsApiPanel({ onClose, onChanged }: Props) {
           <div className="flex items-center gap-3">
             <div className="relative">
               <div className="w-9 h-9 rounded-full bg-black/40 border border-grid-border flex items-center justify-center overflow-hidden">
-                {avatar && (avatar.startsWith("http") || avatar.startsWith("data:")) ? (
+                {avatar &&
+                (avatar.startsWith("http") || avatar.startsWith("data:")) ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={avatar}
@@ -186,12 +195,113 @@ export default function SettingsApiPanel({ onClose, onChanged }: Props) {
                 </div>
               </div>
 
+              <div className="rounded-lg border border-blue-500/40 bg-blue-500/5 px-3 py-2.5 text-xs text-blue-200">
+                <button
+                  type="button"
+                  onClick={() => setShowInstructions(!showInstructions)}
+                  className="w-full flex items-center justify-between font-semibold mb-1 hover:text-blue-100 transition-colors"
+                >
+                  <span className="flex items-center gap-2">
+                    <KeyRound className="w-3.5 h-3.5" />
+                    Jak uzyskać klucze API z AsterDex?
+                  </span>
+                  {showInstructions ? (
+                    <ChevronUp className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  )}
+                </button>
+                {showInstructions && (
+                  <div className="mt-2 space-y-2 text-blue-200/90">
+                    <ol className="list-decimal list-inside space-y-1.5 ml-1">
+                      <li>
+                        Zaloguj się na{" "}
+                        <a
+                          href="https://www.asterdex.com"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-300 hover:text-blue-200 underline inline-flex items-center gap-1"
+                        >
+                          AsterDex
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </li>
+                      <li>
+                        Przejdź do sekcji{" "}
+                        <span className="font-semibold">API Management</span>{" "}
+                        (lub{" "}
+                        <span className="font-semibold">Ustawienia API</span>)
+                      </li>
+                      <li>
+                        Kliknij{" "}
+                        <span className="font-semibold">
+                          "Utwórz nowy klucz API"
+                        </span>{" "}
+                        lub{" "}
+                        <span className="font-semibold">"Create API Key"</span>
+                      </li>
+                      <li>
+                        Nadaj kluczowi nazwę (np.{" "}
+                        <span className="font-semibold">"GridBot Trading"</span>
+                        )
+                      </li>
+                      <li>
+                        <span className="font-semibold">Ważne:</span> Ustaw
+                        uprawnienia:
+                        <ul className="list-disc list-inside ml-4 mt-1 space-y-0.5">
+                          <li>
+                            <span className="font-semibold">TRADE</span> -
+                            wymagane do składania zleceń
+                          </li>
+                          <li>
+                            <span className="font-semibold">READ</span> -
+                            opcjonalne, do odczytu sald
+                          </li>
+                        </ul>
+                      </li>
+                      <li>
+                        <span className="font-semibold">Bezpieczeństwo:</span>{" "}
+                        Ustaw{" "}
+                        <span className="font-semibold">IP whitelist</span>{" "}
+                        jeśli to możliwe (dodaj IP serwera Railway lub zostaw
+                        puste dla testów)
+                      </li>
+                      <li>
+                        Po utworzeniu skopiuj{" "}
+                        <span className="font-semibold">API Key</span> i{" "}
+                        <span className="font-semibold">Secret Key</span>
+                      </li>
+                      <li className="text-amber-300 font-semibold">
+                        ⚠️ Secret Key jest wyświetlany tylko raz! Zapisz go
+                        bezpiecznie.
+                      </li>
+                    </ol>
+                    <div className="mt-2 pt-2 border-t border-blue-500/30">
+                      <p className="text-xs text-blue-300/80">
+                        Jeśli nie możesz znaleźć sekcji API, sprawdź{" "}
+                        <a
+                          href="https://www.asterdex.com/en/api-management"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline hover:text-blue-200 inline-flex items-center gap-1"
+                        >
+                          dokumentację AsterDex
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
                 <div className="font-semibold mb-1">Bezpieczeństwo</div>
                 <ul className="list-disc list-inside space-y-0.5">
                   <li>
                     Klucze API są{" "}
-                    <span className="font-semibold">szyfrowane na serwerze</span>{" "}
+                    <span className="font-semibold">
+                      szyfrowane na serwerze
+                    </span>{" "}
                     przy użyciu stałego klucza z `.env`.
                   </li>
                   <li>
@@ -235,7 +345,9 @@ export default function SettingsApiPanel({ onClose, onChanged }: Props) {
                   Status kluczy:{" "}
                   <span
                     className={
-                      hasKeys ? "text-emerald-400 font-semibold" : "text-red-400"
+                      hasKeys
+                        ? "text-emerald-400 font-semibold"
+                        : "text-red-400"
                     }
                   >
                     {hasKeys ? "Zapisane" : "Brak"}
@@ -265,4 +377,3 @@ export default function SettingsApiPanel({ onClose, onChanged }: Props) {
     </div>
   );
 }
-

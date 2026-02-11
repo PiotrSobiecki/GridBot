@@ -37,13 +37,13 @@ const authMiddleware = (req, res, next) => {
 };
 
 // Pobierz wszystkie ustawienia użytkownika
-router.get("/", authMiddleware, (req, res) => {
+router.get("/", authMiddleware, async (req, res) => {
   try {
-    let settings = UserSettings.findOne({ walletAddress: req.walletAddress });
+    let settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
 
     if (!settings) {
       settings = new UserSettings({ walletAddress: req.walletAddress });
-      settings.save();
+      await settings.save();
     }
 
     res.json({
@@ -63,9 +63,9 @@ router.get("/", authMiddleware, (req, res) => {
  * GET /settings/api
  * Zwraca metadane API (bez kluczy) dla zalogowanego portfela.
  */
-router.get("/api", authMiddleware, (req, res) => {
+router.get("/api", authMiddleware, async (req, res) => {
   try {
-    const settings = UserSettings.findOne({ walletAddress: req.walletAddress });
+    const settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
     const apiConfig = settings?.apiConfig || {};
     const aster = apiConfig.aster || {};
 
@@ -86,11 +86,11 @@ router.get("/api", authMiddleware, (req, res) => {
  * POST /settings/api/aster
  * Zapisuje zaszyfrowane klucze API + metadane konta Aster dla zalogowanego portfela.
  */
-router.post("/api/aster", authMiddleware, (req, res) => {
+router.post("/api/aster", authMiddleware, async (req, res) => {
   try {
     const { name, avatar, apiKey, apiSecret } = req.body || {};
 
-    let settings = UserSettings.findOne({ walletAddress: req.walletAddress });
+    let settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
 
     if (!settings) {
       settings = new UserSettings({ walletAddress: req.walletAddress });
@@ -111,7 +111,7 @@ router.post("/api/aster", authMiddleware, (req, res) => {
 
     cfg.aster = aster;
     settings.apiConfig = cfg;
-    settings.save();
+    await settings.save();
 
     res.json({
       aster: {
@@ -127,18 +127,18 @@ router.post("/api/aster", authMiddleware, (req, res) => {
 });
 
 // Aktualizuj portfel
-router.put("/wallet", authMiddleware, (req, res) => {
+router.put("/wallet", authMiddleware, async (req, res) => {
   try {
     const { wallet } = req.body;
 
-    let settings = UserSettings.findOne({ walletAddress: req.walletAddress });
+    let settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
 
     if (!settings) {
       settings = new UserSettings({ walletAddress: req.walletAddress });
     }
 
     settings.wallet = wallet;
-    settings.save();
+    await settings.save();
 
     res.json(settings.wallet);
   } catch (error) {
@@ -148,9 +148,9 @@ router.put("/wallet", authMiddleware, (req, res) => {
 });
 
 // Pobierz wszystkie zlecenia
-router.get("/orders", authMiddleware, (req, res) => {
+router.get("/orders", authMiddleware, async (req, res) => {
   try {
-    const settings = UserSettings.findOne({ walletAddress: req.walletAddress });
+    const settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
     res.json(normalizeOrders(settings?.orders || []));
   } catch (error) {
     console.error("Get orders error:", error);
@@ -159,11 +159,11 @@ router.get("/orders", authMiddleware, (req, res) => {
 });
 
 // Dodaj nowe zlecenie
-router.post("/orders", authMiddleware, (req, res) => {
+router.post("/orders", authMiddleware, async (req, res) => {
   try {
     const orderData = { ...req.body };
 
-    let settings = UserSettings.findOne({ walletAddress: req.walletAddress });
+    let settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
 
     if (!settings) {
       settings = new UserSettings({ walletAddress: req.walletAddress });
@@ -177,7 +177,7 @@ router.post("/orders", authMiddleware, (req, res) => {
     orderData.id = orderData.id || orderData._id;
 
     settings.orders.push(orderData);
-    settings.save();
+    await settings.save();
 
     res.json(orderData);
   } catch (error) {
@@ -187,12 +187,12 @@ router.post("/orders", authMiddleware, (req, res) => {
 });
 
 // Aktualizuj zlecenie
-router.put("/orders/:orderId", authMiddleware, (req, res) => {
+router.put("/orders/:orderId", authMiddleware, async (req, res) => {
   try {
     const { orderId } = req.params;
     const updateData = req.body;
 
-    let settings = UserSettings.findOne({ walletAddress: req.walletAddress });
+    let settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
 
     if (!settings) {
       return res.status(404).json({ error: "Settings not found" });
@@ -216,14 +216,14 @@ router.put("/orders/:orderId", authMiddleware, (req, res) => {
 
     settings.orders[orderIndex] = updatedOrder;
 
-    settings.save();
+    await settings.save();
 
     // Jeśli zmieniły się kluczowe parametry (np. focusPrice),
     // zaktualizuj także istniejący GridState, żeby wartości u góry
     // (focus, następny zakup/sprzedaż) od razu się zgadzały.
     try {
       const lowerWallet = req.walletAddress.toLowerCase();
-      const state = GridState.findByWalletAndOrderId(lowerWallet, orderId);
+      const state = await GridState.findByWalletAndOrderId(lowerWallet, orderId);
       if (state && typeof updatedOrder.focusPrice === "number") {
         const focusPrice = updatedOrder.focusPrice || 0;
         state.currentFocusPrice = focusPrice;
@@ -238,7 +238,7 @@ router.put("/orders/:orderId", authMiddleware, (req, res) => {
           state.buyTrendCounter || 0,
           updatedOrder
         ).toNumber();
-        state.save();
+        await state.save();
         console.log(
           `🔄 Synced GridState with new focusPrice for wallet=${lowerWallet}, orderId=${orderId}`
         );
@@ -258,11 +258,11 @@ router.put("/orders/:orderId", authMiddleware, (req, res) => {
 });
 
 // Usuń zlecenie
-router.delete("/orders/:orderId", authMiddleware, (req, res) => {
+router.delete("/orders/:orderId", authMiddleware, async (req, res) => {
   try {
     const { orderId } = req.params;
 
-    let settings = UserSettings.findOne({ walletAddress: req.walletAddress });
+    let settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
 
     if (!settings) {
       return res.status(404).json({ error: "Settings not found" });
@@ -271,38 +271,38 @@ router.delete("/orders/:orderId", authMiddleware, (req, res) => {
     settings.orders = settings.orders.filter(
       (o) => (o.id || o._id) !== orderId
     );
-    settings.save();
+    await settings.save();
 
-    // Dodatkowo wyczyść stan GRID + pozycje w SQLite,
+    // Dodatkowo wyczyść stan GRID + pozycje w SQLite/Postgres,
     // żeby scheduler nie próbował dalej przetwarzać tego zlecenia.
-    (async () => {
-      try {
-        const lowerWallet = req.walletAddress.toLowerCase();
-        const state = GridState.findByWalletAndOrderId(lowerWallet, orderId);
+    try {
+      const lowerWallet = req.walletAddress.toLowerCase();
+      const state = await GridState.findByWalletAndOrderId(lowerWallet, orderId);
 
-        if (state) {
-          const dbModule = await import("../trading/db.js");
-          const db = dbModule.default;
+      if (state) {
+        const dbModule = await import("../trading/db.js");
+        const db = dbModule.default;
 
-          db.prepare(
-            "DELETE FROM grid_states WHERE wallet_address = ? AND order_id = ?"
-          ).run(lowerWallet, orderId);
+        const deleteStateStmt = db.prepare(
+          "DELETE FROM grid_states WHERE wallet_address = ? AND order_id = ?"
+        );
+        await deleteStateStmt.run(lowerWallet, orderId);
 
-          db.prepare(
-            "DELETE FROM positions WHERE wallet_address = ? AND order_id = ?"
-          ).run(lowerWallet, orderId);
+        const deletePositionsStmt = db.prepare(
+          "DELETE FROM positions WHERE wallet_address = ? AND order_id = ?"
+        );
+        await deletePositionsStmt.run(lowerWallet, orderId);
 
-          console.log(
-            `🧹 Deleted GRID state and positions for wallet=${lowerWallet}, orderId=${orderId}`
-          );
-        }
-      } catch (cleanupError) {
-        console.error(
-          "⚠️ Failed to cleanup GRID state/positions after order delete:",
-          cleanupError.message
+        console.log(
+          `🧹 Deleted GRID state and positions for wallet=${lowerWallet}, orderId=${orderId}`
         );
       }
-    })();
+    } catch (cleanupError) {
+      console.error(
+        "⚠️ Failed to cleanup GRID state/positions after order delete:",
+        cleanupError.message
+      );
+    }
 
     res.json({ success: true });
   } catch (error) {
@@ -311,16 +311,16 @@ router.delete("/orders/:orderId", authMiddleware, (req, res) => {
   }
 });
 
-// Pobierz historię transakcji (z pozycji w SQLite)
-router.get("/transactions", authMiddleware, (req, res) => {
+// Pobierz historię transakcji (z pozycji w SQLite/Postgres)
+router.get("/transactions", authMiddleware, async (req, res) => {
   try {
     const { limit = 50, offset = 0 } = req.query;
     const {
       Position,
       PositionStatus,
-    } = require("../trading/models/Position.js");
+    } = await import("../trading/models/Position.js");
 
-    const positions = Position.findByWalletAndOrderId(
+    const positions = await Position.findByWalletAndOrderId(
       req.walletAddress,
       null,
       PositionStatus.CLOSED
