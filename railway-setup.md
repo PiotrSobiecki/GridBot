@@ -53,20 +53,23 @@ W projekcie Railway przejdź do **Variables** i dodaj:
 ## Krok 5: Wdrożenie auth-service
 
 ### Opcja A: Przez Railway Dashboard (Docker - zalecane)
+
+**WAŻNE:** Railway musi używać Dockera, nie Railpack/Nixpacks!
+
 1. W projekcie Railway kliknij **"New"** → **"GitHub Repo"** (lub **"Empty Service"**)
 2. Wybierz repozytorium GridBot
-3. **WAŻNE:** W ustawieniach serwisu ustaw **Root Directory** na `auth-service`
-   - Przejdź do Settings → Service Settings → Root Directory
-   - Wpisz: `auth-service`
+3. **Ustaw Builder na Dockerfile:**
+   - Przejdź do **Settings** → **Build** → **Builder**
+   - Wybierz **"Dockerfile"** (NIE "Nixpacks" ani "Railpack")
    - Zapisz zmiany
-4. **Ustaw Builder na Docker:**
-   - Przejdź do Settings → Build → Builder
-   - Wybierz **"Dockerfile"** (nie Nixpacks)
-   - Railway automatycznie użyje `auth-service/Dockerfile`
+4. **Root Directory:**
+   - **Opcja 1:** Zostaw puste (główny katalog) - Railway użyje `Dockerfile` z głównego katalogu
+   - **Opcja 2:** Ustaw na `auth-service` - Railway użyje `auth-service/Dockerfile`
 5. Projekt ma już skonfigurowane pliki:
-   - `auth-service/Dockerfile` - konfiguracja Docker (Node.js 20 Alpine)
-   - `auth-service/railway.toml` - konfiguracja Railway (builder: DOCKERFILE)
-   - `auth-service/package.json` - zależności Node.js
+   - `Dockerfile` (w głównym katalogu) - buduje auth-service
+   - `railway.toml` (w głównym katalogu) - wymusza użycie Dockera
+   - `auth-service/Dockerfile` - alternatywny Dockerfile
+   - `auth-service/railway.toml` - konfiguracja dla auth-service
 
 **Uwagi dotyczące Dockera:**
 - Dockerfile używa `node:20-alpine` (lekki obraz)
@@ -74,10 +77,11 @@ W projekcie Railway przejdź do **Variables** i dodaj:
 - Port 3001 jest eksponowany (Railway automatycznie mapuje PORT env)
 - Railway automatycznie ustawi zmienną `PORT` - aplikacja ją używa
 
-**Jeśli widzisz błędy:**
-- Sprawdź czy Root Directory jest ustawione na `auth-service`
-- Upewnij się że Builder to "Dockerfile" (nie Nixpacks)
-- Sprawdź logi w Railway Dashboard → Deployments → View Logs
+**Jeśli nadal widzisz błąd "Railpack could not determine":**
+- ✅ Upewnij się że Builder to **"Dockerfile"** (NIE Nixpacks/Railpack)
+- ✅ Sprawdź czy `railway.toml` w głównym katalogu ma `builder = "DOCKERFILE"`
+- ✅ Usuń Root Directory lub ustaw na pusty (jeśli używasz Dockerfile z głównego katalogu)
+- ✅ Sprawdź logi w Railway Dashboard → Deployments → View Logs
 
 ### Opcja B: Przez Railway CLI
 ```bash

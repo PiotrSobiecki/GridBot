@@ -1,0 +1,10 @@
+# Railway config dla głównego katalogu
+# Wymusza użycie Dockera
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
