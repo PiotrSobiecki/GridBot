@@ -1,6 +1,7 @@
 // MUSI BYĆ NAJPIERW - przed wszystkimi importami używającymi process.env
 import dotenv from "dotenv";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -87,22 +88,50 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Serve frontend static files (production)
-const frontendPath = path.join(__dirname, "../../frontend/dist");
-app.use(express.static(frontendPath));
+// Serve frontend static files (production: from /app/frontend/dist, local dev: from ../../frontend/dist)
+const frontendPathProd = path.join(__dirname, "../frontend/dist");
+const frontendPathDev = path.join(__dirname, "../../frontend/dist");
+const frontendPath = fs.existsSync(frontendPathProd) ? frontendPathProd : frontendPathDev;
+const frontendExists = fs.existsSync(frontendPath) && fs.existsSync(path.join(frontendPath, "index.html"));
 
-// SPA fallback - serve index.html for all non-API routes
-app.get("*", (req, res, next) => {
-  if (
-    req.path.startsWith("/auth") ||
-    req.path.startsWith("/settings") ||
-    req.path.startsWith("/api") ||
-    req.path.startsWith("/health")
-  ) {
-    return next();
-  }
-  res.sendFile(path.join(frontendPath, "index.html"));
-});
+if (frontendExists) {
+  console.log("📦 Serving frontend from:", frontendPath);
+  app.use(express.static(frontendPath));
+
+  // SPA fallback - serve index.html for all non-API routes
+  app.get("*", (req, res, next) => {
+    if (
+      req.path.startsWith("/auth") ||
+      req.path.startsWith("/settings") ||
+      req.path.startsWith("/api") ||
+      req.path.startsWith("/health") ||
+      req.path.startsWith("/ws")
+    ) {
+      return next();
+    }
+    res.sendFile(path.join(frontendPath, "index.html"));
+  });
+} else {
+  console.log("ℹ️ Frontend not found - serving API only (frontend should be deployed separately)");
+  
+  // API-only fallback - return 404 for non-API routes
+  app.get("*", (req, res, next) => {
+    if (
+      req.path.startsWith("/auth") ||
+      req.path.startsWith("/settings") ||
+      req.path.startsWith("/api") ||
+      req.path.startsWith("/health") ||
+      req.path.startsWith("/ws")
+    ) {
+      return next();
+    }
+    res.status(404).json({
+      error: "Not Found",
+      message: "API endpoint not found. Frontend is deployed separately.",
+      availableEndpoints: ["/auth", "/settings", "/api/trading", "/health"]
+    });
+  });
+}
 
 // Initialize trading services (po załadowaniu .env)
 PriceFeedService.init(wss);
