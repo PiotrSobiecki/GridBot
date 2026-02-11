@@ -16,6 +16,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
+import pg from "pg";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
 
@@ -64,14 +65,13 @@ app.use(express.json());
 app.use(cookieParser());
 
 // Konfiguracja sesji - użyj PostgreSQL store na produkcji, MemoryStore lokalnie
-async function setupSessionStore() {
+function setupSessionStore() {
   const DATABASE_URL = process.env.DATABASE_URL;
   
   if (DATABASE_URL) {
     // Produkcja - użyj PostgreSQL store
     const PgSession = connectPgSimple(session);
-    const pgModule = await import("pg");
-    const { Pool } = pgModule.default || pgModule;
+    const { Pool } = pg;
     const pgPool = new Pool({
       connectionString: DATABASE_URL,
       ssl: DATABASE_URL.includes("localhost") ? false : { rejectUnauthorized: false },
@@ -92,7 +92,7 @@ async function setupSessionStore() {
   }
 }
 
-const sessionStore = await setupSessionStore();
+const sessionStore = setupSessionStore();
 
 app.use(
   session({
