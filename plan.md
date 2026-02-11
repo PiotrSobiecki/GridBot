@@ -42,8 +42,7 @@ Plan wdrożenia z AsterDex Spot (konkretny, pod Twoje API)
    Zrobić mały „audit”:
    porównać strukturę OrderSettings front vs:
    auth-service/src/trading/models/UserSettings.js,
-   trading-engine/src/main/java/com/gridbot/dto/OrderSettingsDto.java,
-   użycie w GridAlgorithmService (JS i Java).
+   użycie w GridAlgorithmService (JS).
    Tam, gdzie jeszcze coś jest „po starym typie” (trend zamiast minPrice/maxPrice), dokończyć migrację.
 5. Realne tradowanie na spocie
    W GridAlgorithmService (najpierw wersja JS w auth-service):

@@ -9,10 +9,8 @@ services:
       - "5173:5173"
     environment:
       - VITE_AUTH_API_URL=http://localhost:3001
-      - VITE_TRADING_API_URL=http://localhost:8080
     depends_on:
       - auth-service
-      - trading-engine
     networks:
       - gridbot-network
 
@@ -29,22 +27,6 @@ services:
       - CORS_ORIGIN=http://localhost:5173
     depends_on:
       - mongodb
-    networks:
-      - gridbot-network
-
-  trading-engine:
-    build:
-      context: ./trading-engine
-      dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
-    environment:
-      - SPRING_PROFILES_ACTIVE=docker
-      - MONGODB_URI=mongodb://mongodb:27017/gridbot
-      - AUTH_SERVICE_URL=http://auth-service:3001
-    depends_on:
-      - mongodb
-      - auth-service
     networks:
       - gridbot-network
 

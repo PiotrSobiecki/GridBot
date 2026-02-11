@@ -5,16 +5,14 @@
 ```
 GridBot/
 ├── frontend/          # React + Vite (UI)
-├── auth-service/      # Node.js (Web3 SIWE Auth)
-├── trading-engine/    # Java Spring Boot (Trading Logic)
+├── auth-service/      # Node.js (Web3 SIWE Auth & Trading Logic)
 └── docker-compose.yml # Orchestration
 ```
 
 ## Technologie
 
 - **Frontend**: React 18, Vite, TailwindCSS, ethers.js, wagmi
-- **Auth Service**: Node.js, Express, siwe, ethers
-- **Trading Engine**: Java 17, Spring Boot 3, WebSocket
+- **Auth Service**: Node.js, Express, siwe, ethers (Web3 Auth & Trading Logic)
 
 ## Uruchomienie
 
@@ -25,9 +23,6 @@ cd frontend && npm install && npm run dev
 
 # Auth Service
 cd auth-service && npm install && npm run dev
-
-# Trading Engine
-cd trading-engine && ./mvnw spring-boot:run
 ```
 
 ### Docker
@@ -56,11 +51,5 @@ Wartość transakcji zmienia się według progów cenowych (104k, 100k, 89k)
 - `POST /auth/verify` - Weryfikuj podpis SIWE
 - `GET /auth/session` - Sprawdź sesję
 - `POST /auth/logout` - Wyloguj
-
-### Trading Engine (port 8080)
-- `GET /api/orders` - Lista zleceń
-- `POST /api/orders` - Utwórz zlecenie
-- `PUT /api/orders/{id}` - Aktualizuj zlecenie
-- `DELETE /api/orders/{id}` - Usuń zlecenie
-- `GET /api/wallet` - Stan portfela
+- `GET /api/trading/*` - Trading endpoints
 - `WS /ws/prices` - WebSocket dla cen
