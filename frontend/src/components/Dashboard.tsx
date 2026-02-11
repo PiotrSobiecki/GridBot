@@ -274,22 +274,27 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [walletAddress, activeOrder?._id, setGridState, gridRefreshIntervalMs]);
 
-  // Nowe zlecenie jest tylko szkicem w UI.
-  // Do bazy zapisujemy je dopiero po kliknięciu "Zapisz" w formularzu.
-  const handleAddOrder = () => {
-    if (!userSettings) return;
+  const handleAddOrder = async () => {
+    try {
+      setIsLoading(true);
+      const newOrder = await api.createOrder({
+        ...defaultOrder,
+        name: `Zlecenie ${orders.length + 1}`,
+      });
 
-    const draftOrder: OrderSettingsType = {
-      ...defaultOrder,
-      name: `Zlecenie ${orders.length + 1}`,
-      // brak _id => front traktuje to jako nowe, jeszcze niezapisane zlecenie
-    };
-
-    setUserSettings({
-      ...userSettings,
-      orders: [...userSettings.orders, draftOrder],
-    });
-    setActiveOrderIndex(orders.length);
+      if (userSettings) {
+        setUserSettings({
+          ...userSettings,
+          orders: [...userSettings.orders, newOrder],
+        });
+        setActiveOrderIndex(orders.length);
+      }
+      toast.success("Dodano nowe zlecenie");
+    } catch (error: any) {
+      toast.error(error.message || "Błąd dodawania zlecenia");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleDuplicateOrder = async () => {

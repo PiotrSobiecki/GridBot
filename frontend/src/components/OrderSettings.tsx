@@ -51,49 +51,74 @@ export default function OrderSettings({
   const [isStarting, setIsStarting] = useState(false);
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  // Ograniczona lista dostępnych krypto BASE - tylko wybrane kryptowaluty
-  const ALLOWED_BASE_ASSETS = ["ASTER", "BTC", "ETH", "BNB"];
-  const [baseAssets, setBaseAssets] = useState<string[]>(ALLOWED_BASE_ASSETS);
+  // Ograniczona lista dostępnych krypto BASE
+  // Docelowo: tylko BTC, ETH, BNB, ASTER
+  const [baseAssets, setBaseAssets] = useState<string[]>([
+    "BTC",
+    "ETH",
+    "BNB",
+    "ASTER",
+  ]);
   // Na Aster spot jako stable obsługujemy tylko USDT
   const [quoteAssets, setQuoteAssets] = useState<string[]>(["USDT"]);
 
   // Synchronizuj localOrder z prop order (np. przy przełączeniu zakładki)
-  // Uwaga: synchronizujemy tylko gdy order._id się zmienia (nowe zlecenie),
-  // żeby nie nadpisywać zmian użytkownika podczas edycji
   useEffect(() => {
-    if (order?._id && order._id !== localOrder?._id) {
-      setLocalOrder(order);
-    }
-  }, [order?._id]);
+    setLocalOrder(order);
+  }, [order?._id, order?.focusPrice, order?.refreshInterval, order?.name, order?.baseAsset, order?.quoteAsset]);
 
   // Utrzymuj spójność walut kupna/sprzedaży z wybraną parą BASE/QUOTE
-  // Tylko synchronizuj sell.currency i buy.currency gdy baseAsset/quoteAsset się zmienia
-  // NIE nadpisuj baseAsset/quoteAsset gdy użytkownik je zmienia ręcznie
+  // Tylko jeśli baseAsset/quoteAsset są ustawione i różne od sell/buy.currency
   useEffect(() => {
     setLocalOrder((prev) => {
       if (!prev) return prev;
       let changed = false;
       const next: any = { ...prev };
 
-      // Synchronizuj sell.currency tylko jeśli baseAsset jest ustawione i różne od sell.currency
+      // Synchronizuj sell.currency z baseAsset tylko jeśli baseAsset jest ustawione
       if (prev.baseAsset && prev.sell?.currency !== prev.baseAsset) {
         next.sell = { ...prev.sell, currency: prev.baseAsset };
         changed = true;
       }
-      // Synchronizuj buy.currency tylko jeśli quoteAsset jest ustawione i różne od buy.currency
+      // Jeśli baseAsset nie jest ustawione, ale sell.currency jest, użyj go jako baseAsset
+      else if (!prev.baseAsset && prev.sell?.currency && baseAssets.includes(prev.sell.currency)) {
+        next.baseAsset = prev.sell.currency;
+        changed = true;
+      }
+
+      // Synchronizuj buy.currency z quoteAsset tylko jeśli quoteAsset jest ustawione
       if (prev.quoteAsset && prev.buy?.currency !== prev.quoteAsset) {
         next.buy = { ...prev.buy, currency: prev.quoteAsset };
+        changed = true;
+      }
+      // Jeśli quoteAsset nie jest ustawione, ale buy.currency jest, użyj go jako quoteAsset
+      else if (!prev.quoteAsset && prev.buy?.currency && quoteAssets.includes(prev.buy.currency)) {
+        next.quoteAsset = prev.buy.currency;
         changed = true;
       }
 
       return changed ? next : prev;
     });
-  }, [localOrder.baseAsset, localOrder.quoteAsset]);
+  }, [localOrder.baseAsset, localOrder.quoteAsset, localOrder.sell?.currency, localOrder.buy?.currency]);
 
-  // Na razie nie pobieramy listy krypto z API – UI ma mieć
-  // sztywną, krótką listę: ASTER, BTC, ETH, BNB.
-  // Jeśli kiedyś będziemy chcieli rozszerzyć listę dynamicznie,
-  // można tu wrócić do api.getAsterSymbols() i filtrowania.
+  // Wyłączone pobieranie z API - używamy sztywnej listy krypto
+  // useEffect(() => {
+  //   // Załaduj listę par z backendu (AsterDex)
+  //   api
+  //     .getAsterSymbols()
+  //     .then((data) => {
+  //       if (Array.isArray(data.baseAssets) && data.baseAssets.length > 0) {
+  //         setBaseAssets(data.baseAssets);
+  //       }
+  //       if (Array.isArray(data.quoteAssets) && data.quoteAssets.length > 0) {
+  //         setQuoteAssets(data.quoteAssets);
+  //       }
+  //     })
+  //     .catch((err: any) => {
+  //       console.error("Failed to load Aster symbols:", err);
+  //       toast.error("Nie udało się pobrać listy par z giełdy");
+  //     });
+  // }, []);
 
   const toggleSection = (section: Section) => {
     const newSections = new Set(expandedSections);
@@ -111,15 +136,11 @@ export default function OrderSettings({
     let current = newOrder;
 
     for (let i = 0; i < keys.length - 1; i++) {
-      if (!current[keys[i]]) {
-        current[keys[i]] = {};
-      }
       current[keys[i]] = { ...current[keys[i]] };
       current = current[keys[i]];
     }
     current[keys[keys.length - 1]] = value;
 
-    console.log(`🔄 updateField: ${path} = ${value}`, newOrder);
     setLocalOrder(newOrder);
   };
 
@@ -133,6 +154,8 @@ export default function OrderSettings({
   };
 
   const handleSave = async () => {
+    if (!order._id) return;
+
     setIsSaving(true);
     try {
       // Sanitizacja pól, które mogą mieć chwilowo pusty string z inputów
@@ -158,40 +181,28 @@ export default function OrderSettings({
         },
       };
 
-      // Jeśli zlecenie nie ma jeszcze _id => tworzymy je w bazie
-      const savedOrder = order._id
-        ? await api.updateOrder(order._id, sanitizedOrder)
-        : await api.createOrder(sanitizedOrder);
+      await api.updateOrder(order._id, sanitizedOrder);
 
       // Pobierz świeże dane z backendu po zapisaniu
       const freshSettings = await api.getSettings();
       if (freshSettings) {
         setUserSettings(freshSettings);
-
-        const targetId =
-          order._id || savedOrder?._id || (savedOrder as any)?.id;
-
-        const freshOrder = targetId
-          ? freshSettings.orders?.find(
-              (o: any) => (o._id || o.id) === targetId
-            )
-          : null;
-
+        // Zaktualizuj lokalny stan zlecenia - użyj sanitizedOrder (zapisanego) jako bazę
+        const freshOrder = freshSettings.orders?.find(
+          (o: any) => (o._id || o.id) === order._id
+        );
+        // Aktualizuj localOrder z zapisanymi danymi (sanitizedOrder ma wszystkie pola z formularza)
         const updatedLocalOrder = freshOrder
-          ? { ...sanitizedOrder, ...freshOrder, _id: targetId }
-          : { ...sanitizedOrder, _id: targetId };
-
+          ? { ...sanitizedOrder, ...freshOrder, _id: order._id }
+          : { ...sanitizedOrder, _id: order._id };
         setLocalOrder(updatedLocalOrder);
 
         // Odśwież też stan gridu (gridState) żeby "Cena Focus" na górze się zaktualizowała
-        if (walletAddress && targetId) {
+        if (walletAddress && order._id) {
           try {
-            const freshGridState = await api.getGridState(
-              walletAddress,
-              targetId
-            );
+            const freshGridState = await api.getGridState(walletAddress, order._id);
             if (freshGridState) {
-              setGridState(targetId, freshGridState);
+              setGridState(order._id, freshGridState);
             }
           } catch (err) {
             // Cicho ignoruj jeśli grid jeszcze nie istnieje
@@ -199,20 +210,11 @@ export default function OrderSettings({
         }
       } else if (userSettings) {
         // Fallback: aktualizuj lokalnie jeśli pobranie z backendu nie powiodło się
-        if (order._id) {
-          const updatedOrders = userSettings.orders.map((o) =>
-            o._id === order._id ? { ...sanitizedOrder, _id: order._id } : o
-          );
-          setUserSettings({ ...userSettings, orders: updatedOrders });
-          setLocalOrder({ ...sanitizedOrder, _id: order._id });
-        } else if (savedOrder) {
-          const targetId = (savedOrder as any)._id || (savedOrder as any).id;
-          setUserSettings({
-            ...userSettings,
-            orders: [...userSettings.orders, { ...sanitizedOrder, _id: targetId }],
-          });
-          setLocalOrder({ ...sanitizedOrder, _id: targetId });
-        }
+        const updatedOrders = userSettings.orders.map((o) =>
+          o._id === order._id ? { ...sanitizedOrder, _id: order._id } : o
+        );
+        setUserSettings({ ...userSettings, orders: updatedOrders });
+        setLocalOrder({ ...sanitizedOrder, _id: order._id });
       }
 
       toast.success("Zapisano ustawienia");
@@ -436,11 +438,17 @@ export default function OrderSettings({
                 value={localOrder.baseAsset || localOrder.sell?.currency || "BTC"}
                 options={baseAssets}
                 onChange={(v) => {
-                  console.log("🔄 BaseAsset changed:", v, "Available options:", baseAssets);
-                  if (v) {
-                    updateField("baseAsset", v);
-                    updateField("sell.currency", v);
-                  }
+                  // Ustaw baseAsset i sell.currency jednocześnie
+                  setLocalOrder((prev) => {
+                    const updated = { ...prev } as any;
+                    updated.baseAsset = v;
+                    if (updated.sell) {
+                      updated.sell = { ...updated.sell, currency: v };
+                    } else {
+                      updated.sell = { currency: v, walletProtection: 0, mode: "walletLimit", maxValue: 0, addProfit: false };
+                    }
+                    return updated;
+                  });
                 }}
               />
               <SelectField
@@ -1336,42 +1344,23 @@ function SelectField({
   options: (string | { value: string; label: string })[];
   onChange: (value: string) => void;
 }) {
-  // Upewnij się że value jest w opcjach, jeśli nie - dodaj jako pierwszą opcję
-  const validOptions = [...options];
-  const currentValue = value || "";
-  if (currentValue && !validOptions.some(opt => {
-    const optValue = typeof opt === "string" ? opt : opt.value;
-    return optValue === currentValue;
-  })) {
-    validOptions.unshift(currentValue);
-  }
-
   return (
     <div>
       <label className="block text-xs text-gray-500 mb-1">{label}</label>
       <select
-        value={currentValue}
-        onChange={(e) => {
-          const newValue = e.target.value;
-          if (newValue) {
-            onChange(newValue);
-          }
-        }}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
         className="w-full px-3 py-2 bg-grid-bg border border-grid-border rounded-lg text-sm focus:outline-none focus:border-emerald-500"
       >
-        {validOptions.length === 0 ? (
-          <option value="">Ładowanie...</option>
-        ) : (
-          validOptions.map((opt) => {
-            const optValue = typeof opt === "string" ? opt : opt.value;
-            const optLabel = typeof opt === "string" ? opt : opt.label;
-            return (
-              <option key={optValue} value={optValue}>
-                {optLabel || optValue}
-              </option>
-            );
-          })
-        )}
+        {options.map((opt) => {
+          const optValue = typeof opt === "string" ? opt : opt.value;
+          const optLabel = typeof opt === "string" ? opt : (opt.label || opt.value);
+          return (
+            <option key={optValue} value={optValue}>
+              {optLabel}
+            </option>
+          );
+        })}
       </select>
     </div>
   );
