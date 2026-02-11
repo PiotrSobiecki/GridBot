@@ -51,15 +51,9 @@ export default function OrderSettings({
   const [isStarting, setIsStarting] = useState(false);
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  // Ograniczona lista dostępnych krypto BASE
-  const [baseAssets, setBaseAssets] = useState<string[]>([
-    "ASTER",
-    "BTC",
-    "ETH",
-    "SOL",
-    "BNB",
-    "XRP",
-  ]);
+  // Ograniczona lista dostępnych krypto BASE - tylko wybrane kryptowaluty
+  const ALLOWED_BASE_ASSETS = ["ASTER", "BTC", "ETH", "BNB"];
+  const [baseAssets, setBaseAssets] = useState<string[]>(ALLOWED_BASE_ASSETS);
   // Na Aster spot jako stable obsługujemy tylko USDT
   const [quoteAssets, setQuoteAssets] = useState<string[]>(["USDT"]);
 
@@ -88,24 +82,34 @@ export default function OrderSettings({
     });
   }, [localOrder.baseAsset, localOrder.quoteAsset]);
 
-  // Wyłączone pobieranie z API - używamy sztywnej listy krypto
-  // useEffect(() => {
-  //   // Załaduj listę par z backendu (AsterDex)
-  //   api
-  //     .getAsterSymbols()
-  //     .then((data) => {
-  //       if (Array.isArray(data.baseAssets) && data.baseAssets.length > 0) {
-  //         setBaseAssets(data.baseAssets);
-  //       }
-  //       if (Array.isArray(data.quoteAssets) && data.quoteAssets.length > 0) {
-  //         setQuoteAssets(data.quoteAssets);
-  //       }
-  //     })
-  //     .catch((err: any) => {
-  //       console.error("Failed to load Aster symbols:", err);
-  //       toast.error("Nie udało się pobrać listy par z giełdy");
-  //     });
-  // }, []);
+  // Pobierz listę dostępnych kryptowalut z AsterDex API i przefiltruj do dozwolonych
+  useEffect(() => {
+    // Załaduj listę par z backendu (AsterDex) i przefiltruj do dozwolonych
+    api
+      .getAsterSymbols()
+      .then((data) => {
+        if (Array.isArray(data.baseAssets) && data.baseAssets.length > 0) {
+          // Filtruj tylko do dozwolonych kryptowalut
+          const filtered = data.baseAssets.filter((asset: string) =>
+            ALLOWED_BASE_ASSETS.includes(asset.toUpperCase())
+          );
+          // Sortuj zgodnie z kolejnością w ALLOWED_BASE_ASSETS
+          const sorted = ALLOWED_BASE_ASSETS.filter((allowed) =>
+            filtered.includes(allowed.toUpperCase())
+          );
+          if (sorted.length > 0) {
+            setBaseAssets(sorted);
+          }
+        }
+        if (Array.isArray(data.quoteAssets) && data.quoteAssets.length > 0) {
+          setQuoteAssets(data.quoteAssets);
+        }
+      })
+      .catch((err: any) => {
+        console.error("Failed to load Aster symbols:", err);
+        // W przypadku błędu użyj domyślnej listy (już ustawionej w useState)
+      });
+  }, []);
 
   const toggleSection = (section: Section) => {
     const newSections = new Set(expandedSections);
@@ -1322,23 +1326,36 @@ function SelectField({
   options: (string | { value: string; label: string })[];
   onChange: (value: string) => void;
 }) {
+  // Upewnij się że value jest w opcjach, jeśli nie - dodaj jako pierwszą opcję
+  const validOptions = [...options];
+  if (value && !validOptions.some(opt => {
+    const optValue = typeof opt === "string" ? opt : opt.value;
+    return optValue === value;
+  })) {
+    validOptions.unshift(value);
+  }
+
   return (
     <div>
       <label className="block text-xs text-gray-500 mb-1">{label}</label>
       <select
-        value={value}
+        value={value || ""}
         onChange={(e) => onChange(e.target.value)}
         className="w-full px-3 py-2 bg-grid-bg border border-grid-border rounded-lg text-sm focus:outline-none focus:border-emerald-500"
       >
-        {options.map((opt) => {
-          const optValue = typeof opt === "string" ? opt : opt.value;
-          const optLabel = typeof opt === "string" ? opt : opt.label;
-          return (
-            <option key={optValue} value={optValue}>
-              {optLabel}
-            </option>
-          );
-        })}
+        {validOptions.length === 0 ? (
+          <option value="">Ładowanie...</option>
+        ) : (
+          validOptions.map((opt) => {
+            const optValue = typeof opt === "string" ? opt : opt.value;
+            const optLabel = typeof opt === "string" ? opt : opt.label;
+            return (
+              <option key={optValue} value={optValue}>
+                {optLabel || optValue}
+              </option>
+            );
+          })
+        )}
       </select>
     </div>
   );
