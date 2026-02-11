@@ -29,6 +29,9 @@ const getCurrencyIconUrl = (symbol: string): string | null => {
       return "https://cryptologos.cc/logos/solana-sol-logo.svg?v=032";
     case "ASTER":
       return "https://assets.coingecko.com/coins/images/69040/standard/_ASTER.png?1757326782";
+    case "USDC":
+      return "https://cryptologos.cc/logos/usd-coin-usdc-logo.svg?v=032";
+
     default:
       return null;
   }
@@ -38,7 +41,7 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
   const { userSettings, setUserSettings, walletAddress, prices } = useStore();
   const [isEditing, setIsEditing] = useState(false);
   const [localWallet, setLocalWallet] = useState<WalletBalance[]>(
-    userSettings?.wallet || []
+    userSettings?.wallet || [],
   );
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -54,7 +57,7 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
           currency,
           balance: parseFloat(balance as string) || 0,
           reserved: 0,
-        })
+        }),
       );
 
       setLocalWallet(wallet);
@@ -78,7 +81,7 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
           currency,
           balance: parseFloat(balance as string) || 0,
           reserved: 0,
-        })
+        }),
       );
       setLocalWallet(wallet);
       if (userSettings) {
@@ -106,7 +109,7 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
             currency,
             balance: parseFloat(balance as string) || 0,
             reserved: 0,
-          })
+          }),
         );
 
         setLocalWallet(wallet);
@@ -144,7 +147,7 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
   const updateBalance = (
     index: number,
     field: keyof WalletBalance,
-    value: string | number
+    value: string | number,
   ) => {
     const newWallet = [...localWallet];
     newWallet[index] = { ...newWallet[index], [field]: value };
@@ -307,7 +310,7 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
                     updateBalance(
                       index,
                       "currency",
-                      e.target.value.toUpperCase()
+                      e.target.value.toUpperCase(),
                     )
                   }
                   className="w-20 px-2 py-1 bg-grid-bg border border-grid-border rounded text-sm font-medium"
@@ -350,18 +353,18 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
                         cur === "BTC"
                           ? "bg-orange-500/20 text-orange-400"
                           : cur === "ETH"
-                          ? "bg-indigo-500/20 text-indigo-300"
-                          : cur === "USDT"
-                          ? "bg-green-500/20 text-green-400"
-                          : cur === "BNB"
-                          ? "bg-yellow-500/20 text-yellow-300"
-                          : cur === "XRP"
-                          ? "bg-slate-500/20 text-slate-200"
-                          : cur === "SOL"
-                          ? "bg-fuchsia-500/20 text-fuchsia-300"
-                          : cur === "ASTER"
-                          ? "bg-emerald-500/20 text-emerald-300"
-                          : "bg-gray-500/20 text-gray-400";
+                            ? "bg-indigo-500/20 text-indigo-300"
+                            : cur === "USDT"
+                              ? "bg-green-500/20 text-green-400"
+                              : cur === "BNB"
+                                ? "bg-yellow-500/20 text-yellow-300"
+                                : cur === "XRP"
+                                  ? "bg-slate-500/20 text-slate-200"
+                                  : cur === "SOL"
+                                    ? "bg-fuchsia-500/20 text-fuchsia-300"
+                                    : cur === "ASTER"
+                                      ? "bg-emerald-500/20 text-emerald-300"
+                                      : "bg-gray-500/20 text-gray-400";
                       return (
                         <div className={`${baseClass} ${cls}`}>
                           {cur.slice(0, 3)}
