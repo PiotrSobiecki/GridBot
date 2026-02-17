@@ -168,6 +168,89 @@ router.get("/positions/:orderId", async (req, res) => {
 });
 
 /**
+ * Usuwa pozycję z historii i bazy danych
+ */
+router.delete("/positions/:positionId", async (req, res) => {
+  try {
+    const walletAddress = req.headers["x-wallet-address"];
+    const { positionId } = req.params;
+
+    if (!walletAddress) {
+      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
+    }
+
+    const { Position } = await import("../trading/models/Position.js");
+    const { GridState } = await import("../trading/models/GridState.js");
+
+    // Znajdź pozycję
+    const position = await Position.findById(positionId);
+    if (!position) {
+      return res.status(404).json({ error: "Position not found" });
+    }
+
+    // Sprawdź czy pozycja należy do tego portfela
+    if (position.walletAddress.toLowerCase() !== walletAddress.toLowerCase()) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    const wasClosed = position.status === "CLOSED";
+    const wasOpen = position.status === "OPEN";
+    const orderId = position.orderId;
+    const positionType = position.type;
+
+    // Usuń pozycję
+    await position.delete();
+
+    // Zaktualizuj GridState
+    if (orderId) {
+      const state = await GridState.findByWalletAndOrderId(
+        walletAddress,
+        orderId
+      );
+      if (state) {
+        // Jeśli była to otwarta pozycja, usuń ją z listy otwartych pozycji
+        if (wasOpen) {
+          if (positionType === "BUY" || !positionType) {
+            state.openPositionIds = state.openPositionIds.filter(
+              (id) => id !== positionId
+            );
+          } else if (positionType === "SELL") {
+            state.openSellPositionIds = state.openSellPositionIds.filter(
+              (id) => id !== positionId
+            );
+          }
+          console.log(
+            `🔄 Removed open position ${positionId} from GridState (type: ${positionType})`
+          );
+        }
+
+        // Jeśli była to zamknięta pozycja, przelicz totalProfit
+        if (wasClosed) {
+          state.totalProfit = await Position.getTotalClosedProfit(
+            walletAddress,
+            orderId
+          );
+          console.log(
+            `🔄 Recalculated totalProfit after position deletion: ${state.totalProfit}`
+          );
+        }
+
+        await state.save();
+      }
+    }
+
+    console.log(
+      `🗑️ Deleted position ${positionId} (wallet=${walletAddress}, orderId=${orderId}, wasClosed=${wasClosed})`
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting position:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * Oblicza następny cel zakupu (preview)
  */
 router.post("/grid/calculate-buy-target", (req, res) => {

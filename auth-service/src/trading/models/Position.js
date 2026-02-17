@@ -102,6 +102,15 @@ export class Position {
   }
 
   /**
+   * Usuwa pozycję z bazy danych
+   */
+  async delete() {
+    const stmt = db.prepare('DELETE FROM positions WHERE id = ?');
+    await stmt.run(this.id);
+    return true;
+  }
+
+  /**
    * Zwraca łączny profit ze wszystkich ZAMKNIĘTYCH pozycji
    * dla danego portfela i zlecenia (long + short).
    * Używane do spójnego wyliczania totalProfit w GridState.

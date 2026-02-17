@@ -116,7 +116,12 @@ async function processOrder(state) {
   const settings = await getOrderSettings(state.walletAddress, state.orderId);
 
   if (!settings) {
-    console.warn(`⚠️ Settings not found for order ${state.orderId}`);
+    // Zlecenie usunięte lub brak w ustawieniach – dezaktywuj stan, żeby scheduler przestał go brać pod uwagę
+    console.warn(
+      `⚠️ Settings not found for order ${state.orderId} – deactivating grid state`
+    );
+    state.isActive = false;
+    await state.save();
     return;
   }
 

@@ -51,6 +51,7 @@ export default function OrderSettings({
   const [isStarting, setIsStarting] = useState(false);
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDeleteFinalConfirm, setShowDeleteFinalConfirm] = useState(false);
   // Ograniczona lista dostępnych krypto BASE
   // Docelowo: tylko BTC, ETH, BNB, ASTER
   const [baseAssets, setBaseAssets] = useState<string[]>([
@@ -1196,12 +1197,14 @@ export default function OrderSettings({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            onClick={() => setShowDeleteConfirm(false)}
           >
             <motion.div
               className="bg-grid-card border border-red-500/40 rounded-xl p-6 w-full max-w-sm shadow-xl"
               initial={{ scale: 0.9, opacity: 0, y: 10 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 10 }}
+              onClick={(e) => e.stopPropagation()}
             >
               <h3 className="text-lg font-semibold text-red-300 mb-2">
                 Usunąć zlecenie?
@@ -1221,14 +1224,79 @@ export default function OrderSettings({
                   Anuluj
                 </button>
                 <button
-                  onClick={async () => {
+                  onClick={() => {
                     setShowDeleteConfirm(false);
-                    await handleDelete();
+                    setShowDeleteFinalConfirm(true);
                   }}
                   className="px-4 py-2 text-sm rounded-lg bg-red-500/80 hover:bg-red-500 text-white flex items-center gap-2"
                 >
                   <Trash2 className="w-4 h-4" />
                   Usuń
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Drugi popup - finalne potwierdzenie */}
+      <AnimatePresence>
+        {showDeleteFinalConfirm && (
+          <motion.div
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowDeleteFinalConfirm(false)}
+          >
+            <motion.div
+              className="bg-grid-card border-2 border-red-500 rounded-xl p-6 w-full max-w-md shadow-2xl"
+              initial={{ scale: 0.9, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 10 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-red-500/20 rounded-lg">
+                  <AlertTriangle className="w-6 h-6 text-red-400" />
+                </div>
+                <h3 className="text-xl font-bold text-red-300">
+                  Ostatnie ostrzeżenie!
+                </h3>
+              </div>
+              <p className="text-sm text-gray-300 mb-2">
+                Czy na pewno chcesz trwale usunąć zlecenie{" "}
+                <span className="font-mono text-red-300 font-semibold">
+                  {localOrder.name}
+                </span>?
+              </p>
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-5">
+                <p className="text-xs text-red-300/90">
+                  ⚠️ To działanie jest <strong>nieodwracalne</strong>. Zostaną usunięte:
+                </p>
+                <ul className="text-xs text-gray-400 mt-2 ml-4 list-disc space-y-1">
+                  <li>Wszystkie ustawienia zlecenia</li>
+                  <li>Historia transakcji i pozycji</li>
+                  <li>Stan algorytmu GRID</li>
+                  <li>Wszystkie dane związane z tym zleceniem</li>
+                </ul>
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowDeleteFinalConfirm(false)}
+                  className="px-4 py-2 text-sm rounded-lg border border-grid-border text-gray-300 hover:bg-grid-bg/60"
+                >
+                  Anuluj
+                </button>
+                <button
+                  onClick={async () => {
+                    setShowDeleteFinalConfirm(false);
+                    await handleDelete();
+                  }}
+                  className="px-4 py-2 text-sm rounded-lg bg-red-600 hover:bg-red-700 text-white flex items-center gap-2 font-semibold"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Tak, usuń na zawsze
                 </button>
               </div>
             </motion.div>

@@ -45,9 +45,17 @@ async function getSymbolPrecision(symbol) {
     (f) => f.filterType === "PRICE_FILTER"
   );
 
+  // Dla quoteOrderQty może być osobny filtr MIN_NOTIONAL lub używać stepSize z quotePrecision
+  const minNotionalFilter = symbolInfo.filters?.find(
+    (f) => f.filterType === "MIN_NOTIONAL"
+  );
+
   return {
     stepSize: lotSizeFilter?.stepSize || null,
     tickSize: priceFilter?.tickSize || null,
+    minNotional: minNotionalFilter?.minNotional || null,
+    quotePrecision: symbolInfo.quotePrecision || null, // Precyzja dla quote currency
+    basePrecision: symbolInfo.basePrecision || null, // Precyzja dla base currency
   };
 }
 
@@ -131,6 +139,22 @@ function roundQuantityToStepSize(quantity, stepSize) {
   return finalQty.toString();
 }
 
+/**
+ * Zaokrągla quoteOrderQty zgodnie z precyzją quote currency
+ * @param {Decimal} quoteAmount - ilość quote currency do zaokrąglenia
+ * @param {number|null} quotePrecision - precyzja quote currency (liczba miejsc po przecinku)
+ * @returns {string} - zaokrąglona ilość jako string
+ */
+function roundQuoteOrderQty(quoteAmount, quotePrecision) {
+  if (quotePrecision != null && quotePrecision >= 0) {
+    // Zaokrąglij do określonej liczby miejsc po przecinku (w dół dla bezpieczeństwa)
+    return quoteAmount.toDecimalPlaces(quotePrecision, Decimal.ROUND_DOWN).toString();
+  }
+  
+  // Fallback: zaokrąglij do 2 miejsc dla USDT (standardowa precyzja stablecoinów)
+  return quoteAmount.toDecimalPlaces(2, Decimal.ROUND_DOWN).toString();
+}
+
 // Odczyt z env przy każdym użyciu (po załadowaniu dotenv), bez spacji/błędów
 function isPaperTrading() {
   const v = String(process.env.PAPER_TRADING ?? "")
@@ -187,13 +211,26 @@ export async function placeSpotBuy(
       };
     }
 
+    // Pobierz precyzję dla symbolu (dla quoteOrderQty)
+    const precision = await getSymbolPrecision(symbol);
+    const roundedQuoteQty = roundQuoteOrderQty(
+      quoteAmount,
+      precision.quotePrecision
+    );
+
+    console.log(
+      `📊 BUY precision for ${symbol}: quotePrecision=${
+        precision.quotePrecision
+      }, quoteQty=${quoteAmount.toString()} -> ${roundedQuoteQty}`
+    );
+
     // Realne zlecenie MARKET BUY na AsterDex
     // Dla MARKET BUY używamy quoteOrderQty (ile quote currency wydać)
     const orderParams = {
       symbol: symbol.toUpperCase(),
       side: "BUY",
       type: "MARKET",
-      quoteOrderQty: quoteAmount.toString(),
+      quoteOrderQty: roundedQuoteQty,
     };
 
     const orderResult = await AsterSpotService.placeOrder(

@@ -169,6 +169,13 @@ class ApiClient {
     });
   }
 
+  async deletePosition(walletAddress: string, positionId: string): Promise<void> {
+    await this.request(TRADING_API, `/api/trading/positions/${positionId}`, {
+      method: "DELETE",
+      headers: { "X-Wallet-Address": walletAddress },
+    });
+  }
+
   async getPrices(): Promise<
     Record<
       string,

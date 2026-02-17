@@ -1,8 +1,14 @@
 import Decimal from "decimal.js";
+import { promises as fs } from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { GridState } from "../models/GridState.js";
 import { Position, PositionStatus, PositionType } from "../models/Position.js";
 import * as WalletService from "./WalletService.js";
 import * as ExchangeService from "./ExchangeService.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Pomocniczy log – pokaż surową wartość zmiennej z .env
 const DEBUG_CONDITIONS_ENV = String(
@@ -32,6 +38,100 @@ if (DEBUG_CONDITIONS) {
 const PRICE_SCALE = 2;
 const AMOUNT_SCALE = 8;
 const DEFAULT_FEE_PERCENT = new Decimal("0.1");
+
+// Ścieżki do plików z logami transakcji
+const TRANSACTIONS_BUY_FILE = path.join(__dirname, "../../../logs/transactions-buy.json");
+const TRANSACTIONS_SELL_FILE = path.join(__dirname, "../../../logs/transactions-sell.json");
+
+// Sprawdź czy logowanie do JSON jest włączone (domyślnie tylko w dev, nie w produkcji)
+const ENABLE_JSON_LOGGING = process.env.NODE_ENV !== "production" || 
+  process.env.ENABLE_TRANSACTION_LOGS === "1";
+
+/**
+ * Zapisuje transakcję zakupu (long) do pliku JSON
+ */
+async function logBuyTransaction(transactionData) {
+  // W produkcji nie zapisujemy do plików JSON (chyba że włączone przez zmienną środowiskową)
+  if (!ENABLE_JSON_LOGGING) {
+    return;
+  }
+
+  try {
+    // Utwórz katalog logs jeśli nie istnieje
+    const logsDir = path.dirname(TRANSACTIONS_BUY_FILE);
+    await fs.mkdir(logsDir, { recursive: true });
+
+    // Wczytaj istniejące transakcje lub utwórz pustą tablicę
+    let transactions = [];
+    try {
+      const content = await fs.readFile(TRANSACTIONS_BUY_FILE, "utf-8");
+      transactions = JSON.parse(content);
+    } catch (error) {
+      // Plik nie istnieje lub jest pusty - utworzymy nowy
+      if (error.code !== "ENOENT") {
+        console.error("Error reading buy transactions file:", error);
+      }
+    }
+
+    // Dodaj nową transakcję na początku tablicy
+    transactions.unshift({
+      ...transactionData,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Zapisz z powrotem do pliku
+    await fs.writeFile(
+      TRANSACTIONS_BUY_FILE,
+      JSON.stringify(transactions, null, 2),
+      "utf-8"
+    );
+  } catch (error) {
+    console.error("Error logging buy transaction:", error);
+  }
+}
+
+/**
+ * Zapisuje transakcję sprzedaży (short) do pliku JSON
+ */
+async function logSellTransaction(transactionData) {
+  // W produkcji nie zapisujemy do plików JSON (chyba że włączone przez zmienną środowiskową)
+  if (!ENABLE_JSON_LOGGING) {
+    return;
+  }
+
+  try {
+    // Utwórz katalog logs jeśli nie istnieje
+    const logsDir = path.dirname(TRANSACTIONS_SELL_FILE);
+    await fs.mkdir(logsDir, { recursive: true });
+
+    // Wczytaj istniejące transakcje lub utwórz pustą tablicę
+    let transactions = [];
+    try {
+      const content = await fs.readFile(TRANSACTIONS_SELL_FILE, "utf-8");
+      transactions = JSON.parse(content);
+    } catch (error) {
+      // Plik nie istnieje lub jest pusty - utworzymy nowy
+      if (error.code !== "ENOENT") {
+        console.error("Error reading sell transactions file:", error);
+      }
+    }
+
+    // Dodaj nową transakcję na początku tablicy
+    transactions.unshift({
+      ...transactionData,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Zapisz z powrotem do pliku
+    await fs.writeFile(
+      TRANSACTIONS_SELL_FILE,
+      JSON.stringify(transactions, null, 2),
+      "utf-8"
+    );
+  } catch (error) {
+    console.error("Error logging sell transaction:", error);
+  }
+}
 
 /** Konwersja Decimal lub number na number (bezpieczna przy zapisie pozycji) */
 function toNum(v) {
@@ -103,18 +203,53 @@ export async function processPrice(
   // Sprawdź warunki kupna
   if (shouldBuy(price, state, settings)) {
     await executeBuy(price, state, settings);
+    // Po wykonaniu zakupu przeładuj stan z bazy, aby kolejne sprawdzenia używały zaktualizowanego focusPrice
+    const updatedState = await GridState.findByWalletAndOrderId(walletAddress, orderId);
+    if (updatedState) {
+      Object.assign(state, updatedState.toJSON());
+      // Przerwij przetwarzanie - poczekaj na następny cykl schedulera
+      state.lastUpdated = new Date().toISOString();
+      await state.save();
+      return state;
+    }
   }
 
   // Sprawdź zamknięcie pozycji kupna (sprzedaż z zyskiem)
-  await checkAndExecuteBuySells(price, state, settings);
+  const buySellExecuted = await checkAndExecuteBuySells(price, state, settings);
+  if (buySellExecuted) {
+    // Po zamknięciu pozycji long przeładuj stan z bazy
+    const updatedState = await GridState.findByWalletAndOrderId(walletAddress, orderId);
+    if (updatedState) {
+      Object.assign(state, updatedState.toJSON());
+      // Przerwij przetwarzanie - poczekaj na następny cykl schedulera
+      state.lastUpdated = new Date().toISOString();
+      await state.save();
+      return state;
+    }
+  }
 
   // Sprawdź warunki sprzedaży short
   if (shouldSellShort(price, state, settings)) {
     await executeSellShort(price, state, settings);
+    // Po wykonaniu sprzedaży przeładuj stan z bazy
+    const updatedState = await GridState.findByWalletAndOrderId(walletAddress, orderId);
+    if (updatedState) {
+      Object.assign(state, updatedState.toJSON());
+      // Przerwij przetwarzanie - poczekaj na następny cykl schedulera
+      state.lastUpdated = new Date().toISOString();
+      await state.save();
+      return state;
+    }
   }
 
   // Sprawdź zamknięcie pozycji short (odkup z zyskiem)
+  // Funkcja sprawdza wszystkie pozycje short i zamyka te które spełniają warunki
   await checkAndExecuteSellBuybacks(price, state, settings);
+  // Po sprawdzeniu wszystkich pozycji short przeładuj stan z bazy
+  const updatedStateAfterSell = await GridState.findByWalletAndOrderId(walletAddress, orderId);
+  if (updatedStateAfterSell) {
+    Object.assign(state, updatedStateAfterSell.toJSON());
+  }
 
   state.lastUpdated = new Date().toISOString();
   await state.save();
@@ -520,22 +655,53 @@ async function executeBuy(currentPrice, state, settings) {
   state.totalBoughtValue = new Decimal(state.totalBoughtValue || 0)
     .plus(transactionValue)
     .toNumber();
-  // Focus wyświetlany w UI ustawiamy na cenę ostatniego zakupu,
-  // ale dla logiki progów:
-  // - aktualizujemy tylko BUY focus (nextBuyTarget),
-  // - SELL focus (nextSellTarget) zostawiamy bez zmian,
-  //   dopóki nie wykonamy osobnej transakcji sprzedaży.
+  
+  // Focus zmienia się na cenę zakupu - to jest nowa baza dla kolejnych zakupów
+  // Po każdym zakupie focus = cena zakupu, a następny cel zakupu jest niższy o procent odpowiadający następnemu trendowi
   state.currentFocusPrice = buyPriceNum;
   state.focusLastUpdated = new Date().toISOString();
+  
+  // Następny cel zakupu obliczamy dla następnego trendu (zwiększonego)
+  // Jeśli trend osiągnął max, następny cel jest dla trendu 0 (cykl się powtarza)
+  // nextBuyTarget = focus - (focus * trendPercent / 100) - zawsze niższy niż focus
+  const nextTrend = state.buyTrendCounter >= maxTrend ? 0 : state.buyTrendCounter;
   state.nextBuyTarget = calculateNextBuyTarget(
-    new Decimal(buyPriceNum),
-    state.buyTrendCounter,
+    new Decimal(buyPriceNum), // Focus = cena zakupu (nowa baza)
+    nextTrend, // Następny trend (zwiększony lub 0 jeśli osiągnięto max)
     settings,
   ).toNumber();
+  
+  if (DEBUG_CONDITIONS) {
+    const trendPercent = getTrendPercent(nextTrend, settings, true);
+    console.log(
+      `🔍 BUY focus updated: price=${buyPriceNum}, trend=${currentTrend}→${state.buyTrendCounter}, ` +
+      `nextTrend=${nextTrend} (${trendPercent}%), nextBuyTarget=${state.nextBuyTarget} ` +
+      `(spadek: ${((buyPriceNum - state.nextBuyTarget) / buyPriceNum * 100).toFixed(2)}%)`
+    );
+  }
 
   console.log(
     `🟢 BUY executed: price=${buyPriceNum}, amount=${amountNum}, value=${transactionValue}, trend=${currentTrend}→${state.buyTrendCounter} focus=${buyPriceNum}`,
   );
+
+  // Loguj transakcję zakupu do pliku JSON
+  await logBuyTransaction({
+    type: "BUY",
+    walletAddress: state.walletAddress,
+    orderId: state.orderId,
+    positionId: position.id,
+    price: buyPriceNum,
+    amount: amountNum,
+    value: buyValueNum,
+    trend: currentTrend,
+    targetSellPrice: toNum(targetSellPrice),
+    status: "OPEN",
+    focusPrice: buyPriceNum,
+    nextBuyTarget: state.nextBuyTarget,
+  });
+
+  // Zapisz zaktualizowany stan (włącznie z nextBuyTarget) do bazy danych
+  await state.save();
 }
 
 /**
@@ -543,11 +709,49 @@ async function executeBuy(currentPrice, state, settings) {
  * Uwzględnia próg cenowy sprzedaży (sellConditions.priceThreshold).
  */
 async function checkAndExecuteBuySells(currentPrice, state, settings) {
-  if (!state.openPositionIds || state.openPositionIds.length === 0) return;
+  // Najpierw zsynchronizuj openPositionIds z rzeczywistymi otwartymi pozycjami w bazie
+  // To zapewni, że wszystkie otwarte pozycje są sprawdzane, nawet jeśli openPositionIds jest nieaktualne
+  const allOpenPositions = await Position.findByWalletAndOrderId(
+    state.walletAddress,
+    state.orderId
+  );
+  const actualOpenPositions = allOpenPositions.filter(
+    (p) => (p.type === "BUY" || !p.type) && p.status === PositionStatus.OPEN
+  );
+  
+  // Zaktualizuj openPositionIds jeśli różni się od rzeczywistych otwartych pozycji
+  const actualOpenIds = actualOpenPositions.map((p) => p.id);
+  if (JSON.stringify(state.openPositionIds.sort()) !== JSON.stringify(actualOpenIds.sort())) {
+    if (DEBUG_CONDITIONS) {
+      console.log(
+        `🔍 BUY_SELL syncing openPositionIds: was ${state.openPositionIds.length}, now ${actualOpenIds.length} ` +
+        `wallet=${state.walletAddress} order=${state.orderId}`
+      );
+    }
+    state.openPositionIds = actualOpenIds;
+    await state.save();
+  }
+
+  if (!state.openPositionIds || state.openPositionIds.length === 0) {
+    if (DEBUG_CONDITIONS) {
+      console.log(
+        `🔍 BUY_SELL skipped (no open positions) wallet=${state.walletAddress} order=${state.orderId}`
+      );
+    }
+    return false;
+  }
 
   const positions = await Position.findByIds(state.openPositionIds);
 
-  // Sortuj po cenie docelowej
+  if (DEBUG_CONDITIONS && positions.length > 0) {
+    console.log(
+      `🔍 BUY_SELL checking ${positions.length} positions wallet=${state.walletAddress} order=${state.orderId} ` +
+      `currentPrice=${currentPrice.toNumber()} ` +
+      `openPositionIds=${JSON.stringify(state.openPositionIds)}`
+    );
+  }
+
+  // Sortuj po cenie docelowej (najniższa pierwsza - najpierw zamknij te z najniższym targetSellPrice)
   positions.sort((a, b) => (a.targetSellPrice || 0) - (b.targetSellPrice || 0));
 
   // Próg sprzedaży: poniżej tej ceny nie sprzedajemy (z wyjątkiem gdy checkThresholdIfProfitable=false i jest zysk)
@@ -556,22 +760,104 @@ async function checkAndExecuteBuySells(currentPrice, state, settings) {
     priceThreshold && currentPrice.lt(new Decimal(priceThreshold));
   if (belowThreshold) {
     if (settings.sellConditions?.checkThresholdIfProfitable) {
-      return; // Zawsze respektuj próg – nie zamykaj pozycji poniżej progu
+      if (DEBUG_CONDITIONS) {
+        console.log(
+          `🔍 BUY_SELL skipped (price threshold) wallet=${state.walletAddress} order=${state.orderId} ` +
+          `currentPrice=${currentPrice.toNumber()} < threshold=${priceThreshold}`
+        );
+      }
+      return false; // Zawsze respektuj próg – nie zamykaj pozycji poniżej progu
     }
     if ((state.totalProfit || 0) <= 0) {
-      return; // Poniżej progu i bez zysku – nie sprzedawaj
+      if (DEBUG_CONDITIONS) {
+        console.log(
+          `🔍 BUY_SELL skipped (threshold+no profit) wallet=${state.walletAddress} order=${state.orderId} ` +
+          `currentPrice=${currentPrice.toNumber()} < threshold=${priceThreshold}, totalProfit=${state.totalProfit}`
+        );
+      }
+      return false; // Poniżej progu i bez zysku – nie sprzedawaj
     }
   }
 
+  let executed = false;
+  let executedCount = 0;
+  const maxExecutionsPerCycle = 10; // Maksymalna liczba pozycji do zamknięcia w jednym cyklu (zabezpieczenie)
+  
   for (const position of positions) {
-    if (position.status !== PositionStatus.OPEN) continue;
-    if (
-      position.targetSellPrice &&
-      currentPrice.gte(position.targetSellPrice)
-    ) {
+    if (position.status !== PositionStatus.OPEN) {
+      if (DEBUG_CONDITIONS) {
+        console.log(
+          `🔍 BUY_SELL skipped (not OPEN) wallet=${state.walletAddress} order=${state.orderId} ` +
+          `position=${position.id} status=${position.status}`
+        );
+      }
+      continue;
+    }
+    
+    if (!position.targetSellPrice) {
+      if (DEBUG_CONDITIONS) {
+        console.log(
+          `🔍 BUY_SELL skipped (no target) wallet=${state.walletAddress} order=${state.orderId} ` +
+          `position=${position.id} - brak targetSellPrice`
+        );
+      }
+      continue;
+    }
+
+    const targetPrice = new Decimal(position.targetSellPrice);
+    const priceReached = currentPrice.gte(targetPrice);
+    
+    if (DEBUG_CONDITIONS) {
+      console.log(
+        `🔍 BUY_SELL check position=${position.id} wallet=${state.walletAddress} order=${state.orderId} ` +
+        `currentPrice=${currentPrice.toNumber()} targetSellPrice=${targetPrice.toNumber()} ` +
+        `reached=${priceReached}`
+      );
+    }
+
+    if (priceReached) {
+      if (DEBUG_CONDITIONS) {
+        console.log(
+          `✅ BUY_SELL executing position=${position.id} wallet=${state.walletAddress} order=${state.orderId} ` +
+          `currentPrice=${currentPrice.toNumber()} targetSellPrice=${targetPrice.toNumber()}`
+        );
+      }
+      
+      // Przeładuj stan przed każdym zamknięciem, aby mieć aktualne dane
+      const currentState = await GridState.findByWalletAndOrderId(state.walletAddress, state.orderId);
+      if (currentState) {
+        Object.assign(state, currentState.toJSON());
+      }
+      
       await executeBuySell(currentPrice, position, state, settings);
+      executed = true;
+      executedCount++;
+      
+      // Przerwij jeśli osiągnięto limit (zabezpieczenie przed zbyt wieloma transakcjami w jednym cyklu)
+      if (executedCount >= maxExecutionsPerCycle) {
+        if (DEBUG_CONDITIONS) {
+          console.log(
+            `⚠️ BUY_SELL limit reached: ${executedCount} positions closed in this cycle`
+          );
+        }
+        break;
+      }
+      
+      // Po zamknięciu pozycji przeładuj stan z bazy przed sprawdzeniem następnej
+      const updatedState = await GridState.findByWalletAndOrderId(state.walletAddress, state.orderId);
+      if (updatedState) {
+        Object.assign(state, updatedState.toJSON());
+      }
     }
   }
+  
+  if (executed && DEBUG_CONDITIONS) {
+    console.log(
+      `✅ BUY_SELL completed: ${executedCount} position(s) closed wallet=${state.walletAddress} order=${state.orderId}`
+    );
+  }
+  
+  return executed;
 }
 
 /**
@@ -605,22 +891,31 @@ async function executeBuySell(currentPrice, position, state, settings) {
   }
 
   // Użyj rzeczywistej wykonanej ilości i średniej ceny z giełdy
-  const executedAmount = exchangeResult.executedQty || amount;
-  let executedPrice = exchangeResult.avgPrice || currentPrice;
-
-  // Upewnij się, że executedPrice jest Decimal
-  if (!(executedPrice instanceof Decimal)) {
-    executedPrice = new Decimal(executedPrice || currentPrice);
+  let executedAmount = exchangeResult.executedQty;
+  let executedPrice = exchangeResult.avgPrice;
+  
+  // Konwersja do Decimal jeśli potrzeba
+  if (executedAmount != null && !(executedAmount instanceof Decimal)) {
+    executedAmount = new Decimal(executedAmount);
+  } else if (executedAmount == null || executedAmount.isZero()) {
+    executedAmount = amount;
   }
-
-  // Fallback: jeśli cena jest 0 lub nieprawidłowa, użyj currentPrice
-  if (executedPrice.isZero() || executedPrice.lte(0)) {
+  
+  if (executedPrice != null && !(executedPrice instanceof Decimal)) {
+    executedPrice = new Decimal(executedPrice);
+  } else if (executedPrice == null || executedPrice.isZero() || executedPrice.lte(0)) {
     executedPrice = new Decimal(currentPrice);
   }
 
   const executedSellValue = executedPrice.mul(executedAmount);
+  // Profit = różnica między wartością sprzedaży a wartością zakupu (w USDT)
+  // Kupiliśmy za buyValue USDT, sprzedaliśmy za executedSellValue USDT
+  // Profit = sellValue - buyValue (różnica w USDT)
   const executedProfit = executedSellValue.minus(position.buyValue);
   const sellPriceNum = toNum(executedPrice);
+  const executedAmountNum = toNum(executedAmount);
+  const executedSellValueNum = executedSellValue.toNumber();
+  const executedProfitNum = executedProfit.toNumber();
 
   // Walidacja: jeśli sellPriceNum jest 0, użyj currentPrice
   const finalSellPrice = sellPriceNum > 0 ? sellPriceNum : toNum(currentPrice);
@@ -635,53 +930,11 @@ async function executeBuySell(currentPrice, position, state, settings) {
 
   // Aktualizuj pozycję BUY (zamknij ją)
   position.sellPrice = finalSellPrice;
-  position.sellValue = executedSellValue.toNumber();
-  position.profit = executedProfit.toNumber();
+  position.sellValue = executedSellValueNum;
+  position.profit = executedProfitNum;
   position.status = PositionStatus.CLOSED;
   position.closedAt = new Date().toISOString();
   await position.save();
-
-  // Utwórz nową pozycję typu SELL w historii sprzedaży (z celem następnego zakupu w UI)
-  const now = new Date().toISOString();
-  // Użyj orderId z pozycji BUY, żeby mieć pewność że jest zgodne
-  const sellOrderId = position.orderId || state.orderId;
-  const sellPosition = new Position({
-    walletAddress: state.walletAddress,
-    orderId: sellOrderId,
-    type: PositionType.SELL,
-    sellPrice: finalSellPrice,
-    sellValue: executedSellValue.toNumber(),
-    amount: toNum(executedAmount),
-    buyPrice: position.buyPrice, // Cena zakupu dla referencji
-    buyValue: position.buyValue,
-    profit: executedProfit.toNumber(),
-    status: PositionStatus.CLOSED, // Sprzedaż jest od razu zamknięta (nie short)
-    createdAt: now, // Data utworzenia = data sprzedaży
-    closedAt: now, // Data zamknięcia = data sprzedaży
-    trendAtBuy: position.trendAtBuy || 0, // Trend z pozycji zakupu dla referencji
-    targetBuybackPrice: nextBuyTargetForDisplay, // Następny cel zakupu (do kolumny "Cel odkupu")
-  });
-  await sellPosition.save();
-
-  console.log(
-    `📝 Created SELL position in history: id=${
-      sellPosition.id
-    }, orderId=${sellOrderId}, wallet=${
-      state.walletAddress
-    }, price=${finalSellPrice}, profit=${executedProfit.toNumber()}`,
-  );
-
-  // Weryfikacja: sprawdź czy pozycja została zapisana
-  const verifyPosition = await Position.findById(sellPosition.id);
-  if (!verifyPosition) {
-    console.error(
-      `❌ ERROR: SELL position ${sellPosition.id} was not saved to database!`,
-    );
-  } else {
-    console.log(
-      `✅ Verified: SELL position ${sellPosition.id} saved successfully`,
-    );
-  }
 
   // Aktualizuj stan: focus = cena sprzedaży; trend w dół (5→4→…→0)
   state.openPositionIds = state.openPositionIds.filter(
@@ -690,7 +943,7 @@ async function executeBuySell(currentPrice, position, state, settings) {
   state.buyTrendCounter = Math.max(0, state.buyTrendCounter - 1);
   state.totalSellTransactions += 1;
   state.totalSoldValue = new Decimal(state.totalSoldValue || 0)
-    .plus(executedSellValue)
+    .plus(executedSellValueNum)
     .toNumber();
   // Przelicz łączny profit na podstawie wszystkich ZAMKNIĘTYCH pozycji
   // (long + short) dla danego zlecenia – dzięki temu Total Profit w UI
@@ -709,8 +962,31 @@ async function executeBuySell(currentPrice, position, state, settings) {
   state.nextBuyTarget = nextBuyTargetForDisplay;
 
   console.log(
-    `🔴 SELL executed: price=${finalSellPrice}, profit=${executedProfit} trend→${state.buyTrendCounter} focus=${finalSellPrice}`,
+    `🔴 SELL executed: price=${finalSellPrice}, amount=${executedAmountNum}, ` +
+    `buyValue=${position.buyValue}, sellValue=${executedSellValueNum}, ` +
+    `profit=${executedProfitNum}, trend→${state.buyTrendCounter} focus=${finalSellPrice}`,
   );
+
+  // Loguj zamknięcie pozycji long (sprzedaż) do pliku JSON
+  await logBuyTransaction({
+    type: "BUY_CLOSE",
+    walletAddress: state.walletAddress,
+    orderId: state.orderId,
+    positionId: position.id,
+    buyPrice: position.buyPrice,
+    sellPrice: finalSellPrice,
+    amount: executedAmountNum,
+    buyValue: position.buyValue,
+    sellValue: executedSellValueNum,
+    profit: executedProfitNum, // Profit = sellValue - buyValue (różnica w USDT)
+    trend: position.trendAtBuy,
+    status: "CLOSED",
+    focusPrice: finalSellPrice,
+    nextBuyTarget: state.nextBuyTarget,
+  });
+
+  // Zapisz zaktualizowany stan (włącznie z nextBuyTarget) do bazy danych
+  await state.save();
 }
 
 /**
@@ -925,23 +1201,34 @@ async function executeSellShort(currentPrice, state, settings) {
 
   // Użyj rzeczywistej wykonanej ilości i średniej ceny z giełdy
   // Zabezpieczenie: jeśli giełda zwróci 0/undefined, użyj naszych wartości.
-  let executedAmount = exchangeResult.executedQty || amount;
-  let executedPrice = exchangeResult.avgPrice || currentPrice;
-  if (!(executedPrice instanceof Decimal)) {
-    executedPrice = new Decimal(executedPrice || currentPrice);
+  let executedAmount = exchangeResult.executedQty;
+  let executedPrice = exchangeResult.avgPrice;
+  
+  // Konwersja do Decimal jeśli potrzeba
+  if (executedAmount != null && !(executedAmount instanceof Decimal)) {
+    executedAmount = new Decimal(executedAmount);
+  } else if (executedAmount == null || executedAmount.isZero()) {
+    executedAmount = amount;
   }
-  if (executedPrice.lte(0)) {
+  
+  if (executedPrice != null && !(executedPrice instanceof Decimal)) {
+    executedPrice = new Decimal(executedPrice);
+  } else if (executedPrice == null || executedPrice.isZero() || executedPrice.lte(0)) {
     executedPrice = new Decimal(currentPrice);
   }
+  
   const executedValue = executedPrice.mul(executedAmount);
+  const executedAmountNum = toNum(executedAmount);
+  const executedPriceNum = toNum(executedPrice);
+  const executedValueNum = executedValue.toNumber();
 
   const position = new Position({
     walletAddress: state.walletAddress,
     orderId: state.orderId,
     type: PositionType.SELL,
-    sellPrice: executedPrice.toNumber(),
-    amount: executedAmount.toNumber(),
-    sellValue: executedValue.toNumber(),
+    sellPrice: executedPriceNum,
+    amount: executedAmountNum,
+    sellValue: executedValueNum,
     trendAtBuy: currentTrend,
     targetBuybackPrice: targetBuybackPrice.toNumber(),
     status: PositionStatus.OPEN,
@@ -953,43 +1240,179 @@ async function executeSellShort(currentPrice, state, settings) {
   state.sellTrendCounter = Math.min(currentTrend + 1, maxTrend);
   state.totalSellTransactions += 1;
   state.totalSoldValue = new Decimal(state.totalSoldValue || 0)
-    .plus(executedValue)
+    .plus(executedValueNum)
     .toNumber();
-  const sellPriceNum = toNum(executedPrice);
+  const sellPriceNum = executedPriceNum;
   // Po otwarciu short:
   // - aktualizujemy tylko SELL focus (nextSellTarget) na bazie ceny sprzedaży,
   // - BUY focus (nextBuyTarget) pozostaje bez zmian, dopóki nie wykonamy BUY.
   state.currentFocusPrice = sellPriceNum;
   state.focusLastUpdated = new Date().toISOString();
+  // Następny cel sprzedaży obliczamy dla następnego trendu (zwiększonego)
+  // Jeśli trend osiągnął max, następny cel jest dla trendu 0 (cykl się powtarza)
+  const nextSellTrend = state.sellTrendCounter >= maxTrend ? 0 : state.sellTrendCounter;
   state.nextSellTarget = calculateNextSellTarget(
     new Decimal(sellPriceNum),
-    state.sellTrendCounter,
+    nextSellTrend,
     settings,
   ).toNumber();
 
   console.log(
-    `🟡 SELL executed: price=${sellPriceNum}, trend=${currentTrend}→${state.sellTrendCounter} focus=${sellPriceNum}`,
+    `🟡 SELL executed: price=${sellPriceNum}, amount=${executedAmountNum}, ` +
+    `value=${executedValueNum}, trend=${currentTrend}→${state.sellTrendCounter} focus=${sellPriceNum}`,
   );
+
+  // Loguj transakcję sprzedaży short do pliku JSON
+  await logSellTransaction({
+    type: "SELL_SHORT",
+    walletAddress: state.walletAddress,
+    orderId: state.orderId,
+    positionId: position.id,
+    sellPrice: sellPriceNum,
+    amount: executedAmountNum,
+    sellValue: executedValueNum,
+    trend: currentTrend,
+    targetBuybackPrice: targetBuybackPrice.toNumber(),
+    status: "OPEN",
+    focusPrice: sellPriceNum,
+    nextSellTarget: state.nextSellTarget,
+  });
+
+  // Zapisz zaktualizowany stan (włącznie z nextSellTarget) do bazy danych
+  await state.save();
 }
 
 /**
  * Sprawdza i wykonuje odkup pozycji short
  */
 async function checkAndExecuteSellBuybacks(currentPrice, state, settings) {
-  if (!state.openSellPositionIds || state.openSellPositionIds.length === 0)
-    return;
+  // Najpierw zsynchronizuj openSellPositionIds z rzeczywistymi otwartymi pozycjami short w bazie
+  // To zapewni, że wszystkie otwarte pozycje short są sprawdzane, nawet jeśli openSellPositionIds jest nieaktualne
+  const allOpenPositions = await Position.findByWalletAndOrderId(
+    state.walletAddress,
+    state.orderId
+  );
+  const actualOpenSellPositions = allOpenPositions.filter(
+    (p) => p.type === PositionType.SELL && p.status === PositionStatus.OPEN
+  );
+  
+  // Zaktualizuj openSellPositionIds jeśli różni się od rzeczywistych otwartych pozycji short
+  const actualOpenSellIds = actualOpenSellPositions.map((p) => p.id);
+  if (JSON.stringify(state.openSellPositionIds.sort()) !== JSON.stringify(actualOpenSellIds.sort())) {
+    if (DEBUG_CONDITIONS) {
+      console.log(
+        `🔍 BUYBACK syncing openSellPositionIds: was ${state.openSellPositionIds.length}, now ${actualOpenSellIds.length} ` +
+        `wallet=${state.walletAddress} order=${state.orderId}`
+      );
+    }
+    state.openSellPositionIds = actualOpenSellIds;
+    await state.save();
+  }
+
+  if (!state.openSellPositionIds || state.openSellPositionIds.length === 0) {
+    if (DEBUG_CONDITIONS) {
+      console.log(
+        `🔍 BUYBACK skipped (no open positions) wallet=${state.walletAddress} order=${state.orderId} ` +
+        `openSellPositionIds=${JSON.stringify(state.openSellPositionIds)}`
+      );
+    }
+    return false;
+  }
 
   const positions = await Position.findByIds(state.openSellPositionIds);
+  
+  if (DEBUG_CONDITIONS && positions.length > 0) {
+    console.log(
+      `🔍 BUYBACK checking ${positions.length} positions wallet=${state.walletAddress} order=${state.orderId} ` +
+      `currentPrice=${currentPrice.toNumber()} ` +
+      `openSellPositionIds=${JSON.stringify(state.openSellPositionIds)}`
+    );
+  }
+
+  // Sortuj po cenie docelowej odkupu (najniższa pierwsza - najpierw odkup te z największym zyskiem)
+  positions.sort((a, b) => (a.targetBuybackPrice || Infinity) - (b.targetBuybackPrice || Infinity));
 
   for (const position of positions) {
     if (position.status !== PositionStatus.OPEN) continue;
-    if (
-      position.targetBuybackPrice &&
-      currentPrice.lte(position.targetBuybackPrice)
-    ) {
-      await executeSellBuyback(currentPrice, position, state, settings);
+    
+    if (!position.targetBuybackPrice) {
+      if (DEBUG_CONDITIONS) {
+        console.log(
+          `🔍 BUYBACK skipped (no target) wallet=${state.walletAddress} order=${state.orderId} ` +
+          `position=${position.id} - brak targetBuybackPrice`
+        );
+      }
+      continue;
     }
+
+    const targetPrice = new Decimal(position.targetBuybackPrice);
+    const priceReached = currentPrice.lte(targetPrice);
+    
+    if (!priceReached) {
+      if (DEBUG_CONDITIONS) {
+        console.log(
+          `🔍 BUYBACK skipped (target not reached) wallet=${state.walletAddress} order=${state.orderId} ` +
+          `position=${position.id} price=${currentPrice.toNumber()} ` +
+          `target=${targetPrice.toNumber()}`
+        );
+      }
+      continue;
+    }
+
+    // Sprawdź minimalne wahanie (swing) - dla odkupu short sprawdzamy spadek od focus (currentFocusPrice)
+    // lub od ceny sprzedaży jeśli focus nie jest dostępny
+    const swingReferencePrice = state.currentFocusPrice > 0 
+      ? new Decimal(state.currentFocusPrice)
+      : (position.sellPrice ? new Decimal(position.sellPrice) : null);
+    
+    if (swingReferencePrice) {
+      const swingOk = meetsMinSwing(
+        swingReferencePrice,
+        currentPrice,
+        position.trendAtBuy || 0,
+        settings,
+        true, // isBuy = true bo odkupujemy (to jest zakup)
+      );
+
+      if (!swingOk) {
+        if (DEBUG_CONDITIONS) {
+          console.log(
+            `🔍 BUYBACK skipped (min swing) wallet=${state.walletAddress} order=${state.orderId} ` +
+            `position=${position.id} referencePrice=${swingReferencePrice.toNumber()} ` +
+            `currentPrice=${currentPrice.toNumber()} target=${targetPrice.toNumber()}`
+          );
+        }
+        continue;
+      }
+    }
+
+    if (DEBUG_CONDITIONS) {
+      console.log(
+        `✅ BUYBACK executing wallet=${state.walletAddress} order=${state.orderId} ` +
+        `position=${position.id} price=${currentPrice.toNumber()} ` +
+        `target=${targetPrice.toNumber()}`
+      );
+    }
+
+    // Przeładuj stan przed każdym odkupem, aby mieć aktualne dane
+    const currentState = await GridState.findByWalletAndOrderId(state.walletAddress, state.orderId);
+    if (currentState) {
+      Object.assign(state, currentState.toJSON());
+    }
+
+    await executeSellBuyback(currentPrice, position, state, settings);
+    
+    // Po odkupie przeładuj stan z bazy przed sprawdzeniem następnej pozycji
+    const updatedState = await GridState.findByWalletAndOrderId(state.walletAddress, state.orderId);
+    if (updatedState) {
+      Object.assign(state, updatedState.toJSON());
+    }
+    
+    // Kontynuuj sprawdzanie innych pozycji (nie przerywaj po pierwszym odkupie)
+    // Wszystkie pozycje short które spełniają warunki będą odkupione w jednym cyklu
   }
+  
+  return false; // Funkcja nie zwraca już boolean - wszystkie pozycje są sprawdzane
 }
 
 /**
@@ -1000,7 +1423,38 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
   const buybackValue = amount.mul(currentPrice);
   const profit = new Decimal(position.sellValue).minus(buybackValue);
 
-  if (profit.lt(0)) return;
+  if (profit.lt(0)) {
+    if (DEBUG_CONDITIONS) {
+      console.log(
+        `🔍 BUYBACK skipped (negative profit) wallet=${state.walletAddress} order=${state.orderId} ` +
+        `position=${position.id} sellValue=${position.sellValue} buybackValue=${buybackValue.toNumber()} profit=${profit.toNumber()}`
+      );
+    }
+    return;
+  }
+
+  // Sprawdź minimalną wartość transakcji
+  if (!meetsMinTransactionValue(buybackValue, settings)) {
+    if (DEBUG_CONDITIONS) {
+      console.log(
+        `🔍 BUYBACK skipped (minTransactionValue) wallet=${state.walletAddress} order=${state.orderId} ` +
+        `position=${position.id} buybackValue=${buybackValue.toNumber()} min=${settings.platform?.minTransactionValue}`
+      );
+    }
+    return;
+  }
+
+  // Sprawdź czy fee nie zje profitu
+  const expectedProfit = profit;
+  if (!checkFeeDoesNotEatProfit(buybackValue, expectedProfit, settings)) {
+    if (DEBUG_CONDITIONS) {
+      console.log(
+        `🔍 BUYBACK skipped (fee>=profit) wallet=${state.walletAddress} order=${state.orderId} ` +
+        `position=${position.id} buybackValue=${buybackValue.toNumber()} expectedProfit=${expectedProfit.toNumber()}`
+      );
+    }
+    return;
+  }
 
   const baseAsset = settings.baseAsset || settings.sell?.currency || "BTC";
   const quoteAsset = settings.quoteAsset || settings.buy?.currency || "USDT";
@@ -1022,17 +1476,38 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
   }
 
   // Użyj rzeczywistej wykonanej ilości i średniej ceny z giełdy
-  const executedAmount = exchangeResult.executedQty || amount;
-  const executedPrice = exchangeResult.avgPrice || currentPrice;
+  let executedAmount = exchangeResult.executedQty;
+  let executedPrice = exchangeResult.avgPrice;
+  
+  // Konwersja do Decimal jeśli potrzeba
+  if (executedAmount != null && !(executedAmount instanceof Decimal)) {
+    executedAmount = new Decimal(executedAmount);
+  } else if (executedAmount == null || executedAmount.isZero()) {
+    executedAmount = amount;
+  }
+  
+  if (executedPrice != null && !(executedPrice instanceof Decimal)) {
+    executedPrice = new Decimal(executedPrice);
+  } else if (executedPrice == null || executedPrice.isZero() || executedPrice.lte(0)) {
+    executedPrice = new Decimal(currentPrice);
+  }
+  
   const executedBuybackValue = executedPrice.mul(executedAmount);
+  // Profit = różnica między wartością sprzedaży a wartością odkupu (w USDT)
+  // Sprzedaliśmy za sellValue USDT, odkupiliśmy za executedBuybackValue USDT
+  // Profit = sellValue - buybackValue (różnica w USDT)
   const executedProfit = new Decimal(position.sellValue).minus(
     executedBuybackValue,
   );
 
   const buybackPriceNum = toNum(executedPrice);
+  const executedAmountNum = toNum(executedAmount);
+  const executedBuybackValueNum = executedBuybackValue.toNumber();
+  const executedProfitNum = executedProfit.toNumber();
+  
   position.buyPrice = buybackPriceNum;
-  position.buyValue = executedBuybackValue.toNumber();
-  position.profit = executedProfit.toNumber();
+  position.buyValue = executedBuybackValueNum;
+  position.profit = executedProfitNum;
   position.status = PositionStatus.CLOSED;
   position.closedAt = new Date().toISOString();
   await position.save();
@@ -1043,7 +1518,7 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
   state.sellTrendCounter = Math.max(0, state.sellTrendCounter - 1);
   state.totalBuyTransactions += 1;
   state.totalBoughtValue = new Decimal(state.totalBoughtValue || 0)
-    .plus(executedBuybackValue)
+    .plus(executedBuybackValueNum)
     .toNumber();
   // Spójne przeliczenie totalProfit na podstawie zamkniętych pozycji
   state.totalProfit = await Position.getTotalClosedProfit(
@@ -1062,8 +1537,31 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
   ).toNumber();
 
   console.log(
-    `🔵 BUYBACK executed: price=${buybackPriceNum}, trend→${state.sellTrendCounter} focus=${buybackPriceNum}`,
+    `🔵 BUYBACK executed: price=${buybackPriceNum}, amount=${executedAmountNum}, ` +
+    `sellValue=${position.sellValue}, buybackValue=${executedBuybackValueNum}, ` +
+    `profit=${executedProfitNum}, trend→${state.sellTrendCounter} focus=${buybackPriceNum}`,
   );
+
+  // Loguj zamknięcie pozycji short (odkup) do pliku JSON
+  await logSellTransaction({
+    type: "SELL_CLOSE",
+    walletAddress: state.walletAddress,
+    orderId: state.orderId,
+    positionId: position.id,
+    sellPrice: position.sellPrice,
+    buybackPrice: buybackPriceNum,
+    amount: executedAmountNum,
+    sellValue: position.sellValue,
+    buybackValue: executedBuybackValueNum,
+    profit: executedProfitNum, // Profit = sellValue - buybackValue (różnica w USDT)
+    trend: position.trendAtBuy,
+    status: "CLOSED",
+    focusPrice: buybackPriceNum,
+    nextSellTarget: state.nextSellTarget,
+  });
+
+  // Zapisz zaktualizowany stan (włącznie z nextSellTarget) do bazy danych
+  await state.save();
 }
 
 /**

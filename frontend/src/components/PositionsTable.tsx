@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   RefreshCw,
   TrendingUp,
   TrendingDown,
   ArrowUpCircle,
   ArrowDownCircle,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import { useStore } from "../store/useStore";
 import { api } from "../api";
@@ -20,6 +22,15 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
     useStore();
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"buy" | "sell">("buy");
+  const [deletingPositionId, setDeletingPositionId] = useState<string | null>(
+    null,
+  );
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(
+    null,
+  );
+  const [showDeleteFinalConfirm, setShowDeleteFinalConfirm] = useState<
+    string | null
+  >(null);
 
   const orderPositions = positions[orderId] || [];
 
@@ -57,6 +68,14 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
       return dateB - dateA; // Najnowsze na górze
     });
 
+  // Liczniki otwartych pozycji - liczymy bezpośrednio z orderPositions dla pewności
+  const openBuyCount = orderPositions.filter(
+    (p) => (p.type === "BUY" || !p.type) && p.status === "OPEN"
+  ).length;
+  const openSellCount = orderPositions.filter(
+    (p) => p.type === "SELL" && p.status === "OPEN"
+  ).length;
+
   const fetchPositions = async () => {
     if (!walletAddress || !orderId) return;
 
@@ -68,6 +87,23 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
       console.error("Failed to fetch positions:", error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleDeletePosition = async (positionId: string) => {
+    if (!walletAddress) return;
+
+    setDeletingPositionId(positionId);
+    setShowDeleteFinalConfirm(null);
+    try {
+      await api.deletePosition(walletAddress, positionId);
+      // Odśwież listę pozycji
+      await fetchPositions();
+    } catch (error) {
+      console.error("Failed to delete position:", error);
+      alert("Nie udało się usunąć pozycji");
+    } finally {
+      setDeletingPositionId(null);
     }
   };
 
@@ -134,7 +170,7 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
             <ArrowDownCircle className="w-3 h-3 sm:w-4 sm:h-4" />
             <span className="hidden sm:inline">Pozycje Zakup</span>
             <span className="sm:hidden">Zakup</span>
-            <span className="ml-1">({buyPositions.filter((p) => p.status === "OPEN").length})</span>
+            <span className="ml-1">({openBuyCount})</span>
           </button>
           <button
             onClick={() => setActiveTab("sell")}
@@ -147,7 +183,7 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
             <ArrowUpCircle className="w-3 h-3 sm:w-4 sm:h-4" />
             <span className="hidden sm:inline">Pozycje Sprzedaż</span>
             <span className="sm:hidden">Sprzedaż</span>
-            <span className="ml-1">({sellPositions.length})</span>
+            <span className="ml-1">({openSellCount})</span>
           </button>
         </div>
         <button
@@ -155,7 +191,9 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
           disabled={isLoading}
           className="p-1.5 sm:p-2 rounded-lg hover:bg-grid-bg transition-colors flex-shrink-0"
         >
-          <RefreshCw className={`w-3 h-3 sm:w-4 sm:h-4 ${isLoading ? "animate-spin" : ""}`} />
+          <RefreshCw
+            className={`w-3 h-3 sm:w-4 sm:h-4 ${isLoading ? "animate-spin" : ""}`}
+          />
         </button>
       </div>
 
@@ -188,16 +226,25 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                 <th className="text-right p-2 sm:p-3 font-medium">
                   {activeTab === "buy" ? "Cena zakupu" : "Cena sprzedaży"}
                 </th>
-                <th className="text-right p-2 sm:p-3 font-medium hidden md:table-cell">Ilość</th>
-                <th className="text-right p-2 sm:p-3 font-medium hidden lg:table-cell">Wartość</th>
-                <th className="text-right p-2 sm:p-3 font-medium hidden lg:table-cell">
-                  {activeTab === "buy"
-                    ? "Cel / cena sprzedaży"
-                    : "Cel / cena zakupu"}
+                <th className="text-right p-2 sm:p-3 font-medium hidden md:table-cell">
+                  Ilość
                 </th>
-                <th className="text-right p-2 sm:p-3 font-medium hidden md:table-cell">Trend</th>
+                <th className="text-right p-2 sm:p-3 font-medium hidden lg:table-cell">
+                  Wartość
+                </th>
+                <th className="text-right p-2 sm:p-3 font-medium hidden md:table-cell">
+                  {activeTab === "buy"
+                    ? "Cel / Cena sprzedaży"
+                    : "Cel / Cena zakupu"}
+                </th>
+                <th className="text-right p-2 sm:p-3 font-medium hidden md:table-cell">
+                  Trend
+                </th>
                 <th className="text-right p-2 sm:p-3 font-medium">P&L</th>
                 <th className="text-center p-2 sm:p-3 font-medium">Status</th>
+                <th className="text-center p-2 sm:p-3 font-medium w-10 sm:w-12">
+                  Akcje
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -208,10 +255,9 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                 const entryValue =
                   activeTab === "buy" ? position.buyValue : position.sellValue;
                 const isClosed = position.status === "CLOSED";
-                // Dodatkowa kolumna:
-                // - dla OTWARTYCH pozycji pokazujemy cel (targetSellPrice / targetBuybackPrice),
-                // - dla ZAMKNIĘTYCH pokazujemy rzeczywistą cenę wyjścia
-                //   (sellPrice dla kupna, buyPrice dla sprzedaży).
+                // Kolumna cel/wyjście:
+                // BUY: dla zamkniętych = cena sprzedaży, dla otwartych = cel sprzedaży.
+                // SELL: dla zamkniętych = cena zakupu (baza), dla otwartych = cel odkupu.
                 const targetOrExitPrice =
                   activeTab === "buy"
                     ? isClosed && position.sellPrice != null
@@ -220,6 +266,11 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                     : isClosed && position.buyPrice != null
                       ? position.buyPrice
                       : position.targetBuybackPrice;
+                // Dla SELL zamkniętej: cena zakupu (po której kupiliśmy przed tą sprzedażą)
+                const sellBuyPrice =
+                  activeTab === "sell" ? position.buyPrice : null;
+                const sellNextTarget =
+                  activeTab === "sell" ? position.targetBuybackPrice : null;
 
                 return (
                   <motion.tr
@@ -230,12 +281,17 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                     className="border-b border-grid-border/50 hover:bg-grid-bg/30"
                   >
                     <td className="p-2 sm:p-3 text-xs sm:text-sm text-gray-400">
-                      <span className="hidden sm:inline">{formatDate(position.createdAt)}</span>
+                      <span className="hidden sm:inline">
+                        {formatDate(position.createdAt)}
+                      </span>
                       <span className="sm:hidden">
-                        {new Date(position.createdAt).toLocaleDateString("pl-PL", {
-                          day: "2-digit",
-                          month: "2-digit",
-                        })}
+                        {new Date(position.createdAt).toLocaleDateString(
+                          "pl-PL",
+                          {
+                            day: "2-digit",
+                            month: "2-digit",
+                          },
+                        )}
                       </span>
                     </td>
                     <td className="p-2 sm:p-3 text-right font-mono text-xs sm:text-sm">
@@ -265,10 +321,15 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                     >
                       {formatPrice(entryValue)}
                     </td>
-                    <td className="p-2 sm:p-3 text-right font-mono text-xs sm:text-sm hidden lg:table-cell">
-                      {targetOrExitPrice != null && targetOrExitPrice > 0
-                        ? formatPrice(targetOrExitPrice)
-                        : "—"}
+                    <td className="p-2 sm:p-3 text-right font-mono text-xs sm:text-sm hidden md:table-cell">
+                      {activeTab === "sell" && isClosed
+                        ? // Dla zamkniętej pozycji sprzedaży: pokaż normalną cenę zakupu (cena odkupu dla shorta)
+                          sellBuyPrice != null && sellBuyPrice > 0
+                          ? formatPrice(sellBuyPrice)
+                          : "—"
+                        : targetOrExitPrice != null && targetOrExitPrice > 0
+                          ? formatPrice(targetOrExitPrice)
+                          : "—"}
                     </td>
                     <td className="p-2 sm:p-3 text-right font-mono text-xs sm:text-sm hidden md:table-cell">
                       <span
@@ -296,8 +357,12 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                             ) : (
                               <TrendingDown className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                             )}
-                            <span className="hidden sm:inline">${Math.abs(unrealized.pnl).toFixed(2)}</span>
-                            <span className="sm:hidden">${Math.abs(unrealized.pnl).toFixed(0)}</span>
+                            <span className="hidden sm:inline">
+                              ${Math.abs(unrealized.pnl).toFixed(2)}
+                            </span>
+                            <span className="sm:hidden">
+                              ${Math.abs(unrealized.pnl).toFixed(0)}
+                            </span>
                           </div>
                           <div className="text-[10px] sm:text-xs opacity-70">
                             {unrealized.pnlPercent >= 0 ? "+" : ""}
@@ -305,18 +370,53 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                           </div>
                         </div>
                       )}
-                      {position.status === "CLOSED" && position.profit && (
-                        <div
-                          className={`font-mono text-xs sm:text-sm ${
-                            position.profit >= 0
-                              ? "text-emerald-400"
-                              : "text-red-400"
-                          }`}
-                        >
-                          <span className="hidden sm:inline">${position.profit.toFixed(2)}</span>
-                          <span className="sm:hidden">${position.profit.toFixed(0)}</span>
-                        </div>
-                      )}
+                      {position.status === "CLOSED" &&
+                        (() => {
+                          // Zysk = wartość sprzedaży − wartość zakupu (w USDT)
+                          // Dla pozycji SELL (short): sellValue (sprzedaż) - buyValue (odkup) = profit
+                          // Dla pozycji BUY (long): sellValue (sprzedaż) - buyValue (zakup) = profit
+                          let closedProfit = null;
+
+                          if (
+                            position.profit != null &&
+                            position.profit !== 0
+                          ) {
+                            // Jeśli profit jest już obliczony i zapisany, użyj go
+                            closedProfit = position.profit;
+                          } else if (
+                            position.sellValue != null &&
+                            position.buyValue != null
+                          ) {
+                            // Oblicz profit: wartość sprzedaży - wartość zakupu
+                            const sellVal = Number(position.sellValue);
+                            const buyVal = Number(position.buyValue);
+                            if (sellVal > 0 && buyVal > 0) {
+                              closedProfit = sellVal - buyVal;
+                            }
+                          }
+
+                          if (closedProfit == null || closedProfit === 0)
+                            return (
+                              <span className="text-gray-500 text-xs">—</span>
+                            );
+
+                          return (
+                            <div
+                              className={`font-mono text-xs sm:text-sm ${
+                                closedProfit >= 0
+                                  ? "text-emerald-400"
+                                  : "text-red-400"
+                              }`}
+                            >
+                              <span className="hidden sm:inline">
+                                ${closedProfit.toFixed(2)}
+                              </span>
+                              <span className="sm:hidden">
+                                ${closedProfit.toFixed(0)}
+                              </span>
+                            </div>
+                          );
+                        })()}
                     </td>
                     <td className="p-2 sm:p-3 text-center">
                       <span
@@ -335,6 +435,20 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                             : "Anulowana"}
                       </span>
                     </td>
+                    <td className="p-2 sm:p-3 text-center">
+                      <button
+                        onClick={() => setShowDeleteConfirm(position.id)}
+                        disabled={deletingPositionId === position.id}
+                        className="p-1.5 rounded-lg hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center mx-auto"
+                        title="Usuń z historii"
+                      >
+                        {deletingPositionId === position.id ? (
+                          <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                        )}
+                      </button>
+                    </td>
                   </motion.tr>
                 );
               })}
@@ -348,7 +462,9 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
         <div className="p-3 sm:p-4 bg-grid-bg/30 border-t border-grid-border">
           <div className="flex justify-between text-xs sm:text-sm">
             <span className="text-gray-500">
-              <span className="hidden sm:inline">Suma otwartych {activeTab === "buy" ? "zakupów" : "sprzedaży"}:</span>
+              <span className="hidden sm:inline">
+                Suma otwartych {activeTab === "buy" ? "zakupów" : "sprzedaży"}:
+              </span>
               <span className="sm:hidden">Suma:</span>
             </span>
             <span className="font-mono">
@@ -366,6 +482,189 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
           </div>
         </div>
       )}
+
+      {/* Pierwszy modal potwierdzenia usunięcia */}
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowDeleteConfirm(null)}
+          >
+            <motion.div
+              className="bg-grid-card border border-red-500/40 rounded-xl p-6 w-full max-w-sm shadow-xl"
+              initial={{ scale: 0.9, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 10 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold text-red-300 mb-2">
+                Usunąć pozycję z historii?
+              </h3>
+              <p className="text-sm text-gray-400 mb-5">
+                To działanie jest nieodwracalne. Pozycja zostanie trwale
+                usunięta z bazy danych.
+                {(() => {
+                  const pos = displayPositions.find(
+                    (p) => p.id === showDeleteConfirm,
+                  );
+                  if (pos && pos.status === "CLOSED" && pos.profit) {
+                    return (
+                      <span className="block mt-2 text-red-300">
+                        Uwaga: Ta pozycja ma zrealizowany zysk $
+                        {pos.profit.toFixed(2)}. Usunięcie wpłynie na całkowity
+                        profit zlecenia.
+                      </span>
+                    );
+                  }
+                  return null;
+                })()}
+              </p>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowDeleteConfirm(null)}
+                  className="px-4 py-2 text-sm rounded-lg border border-grid-border text-gray-300 hover:bg-grid-bg/60"
+                >
+                  Anuluj
+                </button>
+                <button
+                  onClick={() => {
+                    if (showDeleteConfirm) {
+                      setShowDeleteConfirm(null);
+                      setShowDeleteFinalConfirm(showDeleteConfirm);
+                    }
+                  }}
+                  className="px-4 py-2 text-sm rounded-lg bg-red-500/80 hover:bg-red-500 text-white flex items-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Usuń
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Drugi modal - finalne potwierdzenie */}
+      <AnimatePresence>
+        {showDeleteFinalConfirm && (
+          <motion.div
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowDeleteFinalConfirm(null)}
+          >
+            <motion.div
+              className="bg-grid-card border-2 border-red-500 rounded-xl p-6 w-full max-w-md shadow-2xl"
+              initial={{ scale: 0.9, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 10 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-red-500/20 rounded-lg">
+                  <AlertTriangle className="w-6 h-6 text-red-400" />
+                </div>
+                <h3 className="text-xl font-bold text-red-300">
+                  Ostatnie ostrzeżenie!
+                </h3>
+              </div>
+              {(() => {
+                const pos = displayPositions.find(
+                  (p) => p.id === showDeleteFinalConfirm,
+                );
+                const isOpen = pos && pos.status === "OPEN";
+                const isClosed = pos && pos.status === "CLOSED";
+
+                return (
+                  <>
+                    <p className="text-sm text-gray-300 mb-2">
+                      Czy na pewno chcesz trwale usunąć tę pozycję z historii?
+                    </p>
+
+                    {isOpen && (
+                      <div className="bg-red-500/20 border-2 border-red-500/50 rounded-lg p-4 mb-5">
+                        <p className="text-sm text-red-300 font-semibold mb-2">
+                          ⚠️ UWAGA: To jest OTWARTA pozycja!
+                        </p>
+                        <p className="text-xs text-red-200/90 mb-2">
+                          Usunięcie otwartej pozycji może spowodować:
+                        </p>
+                        <ul className="text-xs text-red-200/80 ml-4 list-disc space-y-1">
+                          <li>Niespójność w algorytmie GRID</li>
+                          <li>Problemy z kalkulacją trendu i celów</li>
+                          <li>
+                            Brak możliwości zamknięcia tej pozycji w przyszłości
+                          </li>
+                        </ul>
+                      </div>
+                    )}
+
+                    {isClosed && pos.profit && (
+                      <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-5">
+                        <p className="text-xs text-red-300/90 mb-2">
+                          ⚠️ Ta pozycja ma zrealizowany zysk{" "}
+                          <span className="font-mono font-semibold">
+                            ${pos.profit.toFixed(2)}
+                          </span>
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          Usunięcie wpłynie na całkowity profit zlecenia i nie
+                          będzie można tego cofnąć.
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-5">
+                      <p className="text-xs text-red-300/90">
+                        ⚠️ To działanie jest <strong>nieodwracalne</strong>. Po
+                        usunięciu:
+                      </p>
+                      <ul className="text-xs text-gray-400 mt-2 ml-4 list-disc space-y-1">
+                        <li>Pozycja zostanie trwale usunięta z bazy danych</li>
+                        <li>Nie będzie widoczna w historii transakcji</li>
+                        {isOpen && (
+                          <li>
+                            Pozycja zostanie usunięta z listy otwartych pozycji
+                            w algorytmie
+                          </li>
+                        )}
+                        {isClosed && (
+                          <li>
+                            Całkowity profit zlecenia zostanie przeliczony
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  </>
+                );
+              })()}
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowDeleteFinalConfirm(null)}
+                  className="px-4 py-2 text-sm rounded-lg border border-grid-border text-gray-300 hover:bg-grid-bg/60"
+                >
+                  Anuluj
+                </button>
+                <button
+                  onClick={async () => {
+                    if (showDeleteFinalConfirm) {
+                      await handleDeletePosition(showDeleteFinalConfirm);
+                    }
+                  }}
+                  className="px-4 py-2 text-sm rounded-lg bg-red-600 hover:bg-red-700 text-white flex items-center gap-2 font-semibold"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Tak, usuń na zawsze
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
