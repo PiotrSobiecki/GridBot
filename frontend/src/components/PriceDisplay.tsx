@@ -17,7 +17,7 @@ export default function PriceDisplay() {
   const refreshIntervalMs = refreshIntervalSec * 1000;
 
   // Sztywna lista krypto do wyświetlenia na pasku (zawsze pokazujemy te, nawet jeśli brak cen)
-  const DISPLAYED_CRYPTOS = ["ASTER", "BTC", "ETH", "SOL", "BNB", "XRP"];
+  const DISPLAYED_CRYPTOS = ["ASTER", "BTC", "ETH", "BNB"];
   const [baseAssets] = useState<string[]>(DISPLAYED_CRYPTOS);
 
   // Pobieraj ceny z backendu w tym samym interwale co odświeżanie / sprawdzanie na stronie

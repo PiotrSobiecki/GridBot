@@ -131,23 +131,32 @@ async function httpRequest(
 
   const res = await fetch(url.toString(), { method, headers });
 
-  if (!res.ok) {
-    let body;
-    try {
-      body = await res.json();
-    } catch {
-      body = await res.text();
+  // Odczytaj body tylko raz - użyj clone() jeśli potrzebujemy go wielokrotnie
+  let responseBody;
+  const contentType = res.headers.get("content-type") || "";
+  
+  try {
+    if (contentType.includes("application/json")) {
+      responseBody = await res.json();
+    } else {
+      responseBody = await res.text();
     }
+  } catch (error) {
+    console.error(`❌ AsterSpotService: Failed to parse response body for ${path}:`, error.message);
+    throw new Error(`Failed to parse response: ${error.message}`);
+  }
+
+  if (!res.ok) {
     console.error(
       `❌ AsterSpotService ${method} ${path} failed: ${res.status} ${res.statusText}`,
-      body
+      responseBody
     );
     throw new Error(
-      body?.msg || body?.message || `AsterSpotService error ${res.status}`
+      responseBody?.msg || responseBody?.message || `AsterSpotService error ${res.status}`
     );
   }
 
-  return res.json();
+  return responseBody;
 }
 
 /**
@@ -198,40 +207,94 @@ export async function fetchFuturesTickerPrice(symbol) {
   return result;
 }
 
+/**
+ * Pobiera cenę dla konkretnego symbolu z SPOT API
+ * Używa endpointu /api/v1/ticker/price (zwraca tylko ostatnią cenę).
+ * @param {string} symbol - Symbol pary (np. "BTCUSDT")
+ * @returns {Promise<{symbol: string, price: string, priceChangePercent: number | null}>}
+ */
+export async function fetchSpotTickerPrice(symbol) {
+  const result = await httpRequest("/api/v1/ticker/price", {
+    method: "GET",
+    signed: false,
+    useFutures: false, // Użyj Spot API
+    query: { symbol },
+  });
+
+  // Endpoint /api/v1/ticker/price zwraca { symbol, price, time } – bez zmiany 24h.
+  // Dla spójności z PriceFeedService dodajemy pole priceChangePercent jako null.
+  return {
+    symbol: result.symbol,
+    price: result.price,
+    priceChangePercent: result.priceChangePercent ?? null,
+  };
+}
+
 // Tylko te krypto pobieramy z API (zgodne z frontem: pasek + wybór BASE)
 const TICKER_SYMBOLS = [
   "ASTERUSDT",
   "BTCUSDT",
   "ETHUSDT",
-  "SOLUSDT",
   "BNBUSDT",
-  "XRPUSDT",
 ];
 
 /**
- * Zwraca ceny tylko dla wybranych kryptowalut z FUTURES API.
+ * Zwraca ceny tylko dla wybranych kryptowalut.
+ * Ceny pobierane ze Spot API, zmiany cen (priceChangePercent) z Futures API (24h ticker).
  * Format: [{ symbol: "BTCUSDT", price: "94000.0", priceChangePercent: "2.45" }, ...]
  */
 export async function fetchAllTickerPrices() {
   try {
     const prices = [];
 
+    // Pobierz ceny ze Spot API i zmiany z Futures API równolegle
     const batchPromises = TICKER_SYMBOLS.map(async (symbol) => {
       try {
-        const ticker = await fetchFuturesTickerPrice(symbol);
-        if (ticker && ticker.lastPrice) {
-          return {
-            symbol: ticker.symbol,
-            price: ticker.lastPrice,
-            // priceChangePercent z 24h tickera (Binance-style API)
-            priceChangePercent:
-              ticker.priceChangePercent != null
-                ? parseFloat(ticker.priceChangePercent)
-                : null,
-          };
+        // Pobierz cenę ze Spot API
+        const spotTicker = await fetchSpotTickerPrice(symbol);
+        
+        if (!spotTicker || !spotTicker.price) {
+          return null;
         }
+
+        // Pobierz zmianę cen z Futures API (24h ticker)
+        let priceChangePercent = null;
+        try {
+          const futuresTicker = await fetchFuturesTickerPrice(symbol);
+          if (futuresTicker && futuresTicker.priceChangePercent != null) {
+            priceChangePercent = parseFloat(futuresTicker.priceChangePercent);
+          }
+        } catch (futuresErr) {
+          // Jeśli Futures API nie działa, zostaw priceChangePercent jako null
+          // Cena ze Spot jest ważniejsza niż zmiana z Futures
+        }
+
+        return {
+          symbol: spotTicker.symbol,
+          price: spotTicker.price, // Cena ze Spot API
+          priceChangePercent: priceChangePercent, // Zmiana z Futures API (24h)
+        };
       } catch (err) {
-        console.warn(`⚠️ Błąd ceny dla ${symbol}:`, err.message);
+        // Jeśli symbol nie jest dostępny na Spot API, spróbuj z Futures API jako fallback
+        if (err.message && err.message.includes("Invalid symbol")) {
+          try {
+            console.warn(`⚠️ Symbol ${symbol} niedostępny na Spot API, próba z Futures API...`);
+            const futuresTicker = await fetchFuturesTickerPrice(symbol);
+            if (futuresTicker && futuresTicker.lastPrice) {
+              return {
+                symbol: futuresTicker.symbol,
+                price: futuresTicker.lastPrice,
+                priceChangePercent: futuresTicker.priceChangePercent != null
+                  ? parseFloat(futuresTicker.priceChangePercent)
+                  : null,
+              };
+            }
+          } catch (futuresErr) {
+            console.warn(`⚠️ Błąd ceny dla ${symbol} również z Futures API:`, futuresErr.message);
+          }
+        } else {
+          console.warn(`⚠️ Błąd ceny dla ${symbol} ze Spot API:`, err.message);
+        }
       }
       return null;
     });
@@ -242,12 +305,12 @@ export async function fetchAllTickerPrices() {
     });
 
     console.log(
-      `✅ Pobrano ${prices.length}/${TICKER_SYMBOLS.length} cen z futures API`
+      `✅ Pobrano ${prices.length}/${TICKER_SYMBOLS.length} cen (Spot API) + zmiany (Futures API)`
     );
     return prices;
   } catch (error) {
     console.error(
-      `❌ Błąd pobierania cen z futures API:`,
+      `❌ Błąd pobierania cen:`,
       error.message,
       error.stack
     );

@@ -684,6 +684,184 @@ async function executeBuy(currentPrice, state, settings) {
     `🟢 BUY executed: price=${buyPriceNum}, amount=${amountNum}, value=${transactionValue}, trend=${currentTrend}→${state.buyTrendCounter} focus=${buyPriceNum}`,
   );
 
+  // Oblicz szczegółowe źródło kwoty zakupu - krok po kroku
+  const trendPercent = getTrendPercent(currentTrend, settings, true);
+  const minValuePer1Percent = settings.buyConditions?.minValuePer1Percent || 200;
+  
+  // Krok 1: Oblicz podstawową wartość
+  const baseValueStep1 = minValuePer1Percent * trendPercent.toNumber();
+  let calculationSteps = [
+    {
+      step: 1,
+      description: "Podstawowa wartość na 1%",
+      formula: `minValuePer1Percent × trendPercent`,
+      values: {
+        minValuePer1Percent: minValuePer1Percent,
+        trendPercent: trendPercent.toNumber().toFixed(4),
+        result: baseValueStep1.toFixed(2)
+      },
+      result: baseValueStep1
+    }
+  ];
+
+  // Krok 2: Sprawdź faktyczny spadek ceny
+  let actualDropPercent = null;
+  try {
+    const focus = new Decimal(state.currentFocusPrice || 0);
+    if (!focus.isZero()) {
+      actualDropPercent = focus.minus(currentPrice).div(focus).mul(100).toDecimalPlaces(1, Decimal.ROUND_DOWN).toNumber();
+    }
+  } catch {}
+  
+  calculationSteps.push({
+    step: 2,
+    description: "Faktyczny spadek ceny od focus",
+    formula: `(focusPrice - currentPrice) / focusPrice × 100`,
+    values: {
+      focusPrice: (state.currentFocusPrice || 0).toFixed(2),
+      currentPrice: currentPrice.toNumber().toFixed(2),
+      actualDropPercent: actualDropPercent != null ? actualDropPercent.toFixed(2) + "%" : "brak focus",
+      trendPercentFromSettings: trendPercent.toNumber().toFixed(4) + "%",
+      effectiveTrendPercent: effectiveTrendPercent.toNumber().toFixed(4) + "%",
+      note: actualDropPercent != null && actualDropPercent > trendPercent.toNumber() 
+        ? "Użyto faktycznego spadku (większy niż trend z ustawień)" 
+        : "Użyto trendPercent z ustawień"
+    },
+    result: effectiveTrendPercent.toNumber()
+  });
+
+  // Krok 3: Dodatkowe wartości z progów cenowych
+  let additionalValueStep3 = 0;
+  let additionalThreshold = null;
+  const additionalBuyValues = settings.additionalBuyValues;
+  if (additionalBuyValues && additionalBuyValues.length > 0) {
+    for (const threshold of additionalBuyValues) {
+      if (matchesThreshold(currentPrice, threshold)) {
+        const addVal = new Decimal(threshold.value || 0);
+        const addComponent = addVal.mul(trendPercent);
+        additionalValueStep3 = addComponent.toNumber();
+        additionalThreshold = threshold;
+        break;
+      }
+    }
+  }
+
+  if (additionalValueStep3 > 0) {
+    calculationSteps.push({
+      step: 3,
+      description: "Dodatkowa wartość z progu cenowego",
+      formula: `additionalValue × trendPercent`,
+      values: {
+        priceRange: `[${additionalThreshold?.minPrice ?? "-"}, ${additionalThreshold?.maxPrice ?? "-"}]`,
+        additionalValue: additionalThreshold?.value || 0,
+        trendPercent: trendPercent.toNumber().toFixed(4),
+        result: additionalValueStep3.toFixed(2)
+      },
+      result: additionalValueStep3
+    });
+  }
+
+  // Krok 4: Wartość przed ograniczeniem max
+  const valueBeforeMax = baseValueStep1 + additionalValueStep3;
+  calculationSteps.push({
+    step: calculationSteps.length + 1,
+    description: "Wartość przed ograniczeniem maksymalnym",
+    formula: `baseValue + additionalValue`,
+    values: {
+      baseValue: baseValueStep1.toFixed(2),
+      additionalValue: additionalValueStep3.toFixed(2),
+      result: valueBeforeMax.toFixed(2)
+    },
+    result: valueBeforeMax
+  });
+
+  // Krok 5: Ograniczenie maksymalnej wartości
+  let maxValueStep5 = null;
+  let maxThreshold = null;
+  const maxBuyValues = settings.maxBuyPerTransaction;
+  if (maxBuyValues && maxBuyValues.length > 0) {
+    for (const threshold of maxBuyValues) {
+      if (matchesThreshold(currentPrice, threshold)) {
+        const maxVal = new Decimal(threshold.value || 10000);
+        if (valueBeforeMax > maxVal.toNumber()) {
+          maxValueStep5 = maxVal.toNumber();
+          maxThreshold = threshold;
+        }
+        break;
+      }
+    }
+  }
+
+  if (maxValueStep5 != null) {
+    calculationSteps.push({
+      step: calculationSteps.length + 1,
+      description: "Ograniczenie maksymalnej wartości",
+      formula: `min(wartośćPrzedMax, maxValue)`,
+      values: {
+        valueBeforeMax: valueBeforeMax.toFixed(2),
+        maxValue: maxValueStep5.toFixed(2),
+        priceRange: `[${maxThreshold?.minPrice ?? "-"}, ${maxThreshold?.maxPrice ?? "-"}]`,
+        result: maxValueStep5.toFixed(2),
+        note: "Wartość została ograniczona do maksimum"
+      },
+      result: maxValueStep5
+    });
+  }
+
+  // Krok 6: Finalna obliczona wartość transakcji
+  const finalCalculatedValue = maxValueStep5 != null ? maxValueStep5 : valueBeforeMax;
+  calculationSteps.push({
+    step: calculationSteps.length + 1,
+    description: "Finalna obliczona wartość transakcji",
+    formula: maxValueStep5 != null ? "wartośćPrzedMax ograniczona do maxValue" : "baseValue + additionalValue",
+    values: {
+      result: finalCalculatedValue.toFixed(2)
+    },
+    result: finalCalculatedValue
+  });
+
+  // Krok 7: Obliczona ilość
+  const calculatedAmount = finalCalculatedValue / currentPrice.toNumber();
+  calculationSteps.push({
+    step: calculationSteps.length + 1,
+    description: "Obliczona ilość",
+    formula: `transactionValue / currentPrice`,
+    values: {
+      transactionValue: finalCalculatedValue.toFixed(2),
+      currentPrice: currentPrice.toNumber().toFixed(2),
+      result: calculatedAmount.toFixed(8)
+    },
+    result: calculatedAmount
+  });
+
+  // Krok 8: Rzeczywiste wartości z giełdy
+  calculationSteps.push({
+    step: calculationSteps.length + 1,
+    description: "Rzeczywiste wartości z giełdy",
+    formula: "Wartości zwrócone przez ExchangeService",
+    values: {
+      executedPrice: buyPriceNum.toFixed(2),
+      executedAmount: amountNum.toFixed(8),
+      executedValue: buyValueNum.toFixed(2),
+      priceSource: exchangeResult.avgPrice ? "exchange (avgPrice)" : "currentPrice (fallback)",
+      amountSource: exchangeResult.executedQty ? "exchange (executedQty)" : "calculated (fallback)"
+    },
+    result: buyValueNum
+  });
+
+  const calculationDetails = {
+    summary: {
+      trend: currentTrend,
+      trendPercent: trendPercent.toNumber().toFixed(4) + "%",
+      effectiveTrendPercent: effectiveTrendPercent.toNumber().toFixed(4) + "%",
+      calculatedTransactionValue: finalCalculatedValue.toFixed(2),
+      executedValue: buyValueNum.toFixed(2),
+      currentPrice: currentPrice.toNumber().toFixed(2),
+      executedPrice: buyPriceNum.toFixed(2)
+    },
+    steps: calculationSteps
+  };
+
   // Loguj transakcję zakupu do pliku JSON
   await logBuyTransaction({
     type: "BUY",
@@ -698,6 +876,7 @@ async function executeBuy(currentPrice, state, settings) {
     status: "OPEN",
     focusPrice: buyPriceNum,
     nextBuyTarget: state.nextBuyTarget,
+    calculationDetails: calculationDetails,
   });
 
   // Zapisz zaktualizowany stan (włącznie z nextBuyTarget) do bazy danych
@@ -967,6 +1146,79 @@ async function executeBuySell(currentPrice, position, state, settings) {
     `profit=${executedProfitNum}, trend→${state.buyTrendCounter} focus=${finalSellPrice}`,
   );
 
+  // Oblicz szczegółowe źródło kwoty sprzedaży - krok po kroku
+  const sellCalculationSteps = [
+    {
+      step: 1,
+      description: "Dane z pozycji zakupu",
+      formula: "Zapamiętane wartości z momentu zakupu",
+      values: {
+        buyPrice: position.buyPrice.toFixed(2),
+        buyAmount: position.amount.toFixed(8),
+        buyValue: position.buyValue.toFixed(2)
+      },
+      result: position.buyValue
+    },
+    {
+      step: 2,
+      description: "Aktualna cena rynkowa",
+      formula: "Cena pobrana z PriceFeedService",
+      values: {
+        currentPrice: currentPrice.toNumber().toFixed(2),
+        source: "PriceFeedService.getPrice()"
+      },
+      result: currentPrice.toNumber()
+    },
+    {
+      step: 3,
+      description: "Obliczona wartość sprzedaży",
+      formula: "buyAmount × currentPrice",
+      values: {
+        buyAmount: position.amount.toFixed(8),
+        currentPrice: currentPrice.toNumber().toFixed(2),
+        calculatedSellValue: (position.amount * currentPrice.toNumber()).toFixed(2)
+      },
+      result: position.amount * currentPrice.toNumber()
+    },
+    {
+      step: 4,
+      description: "Rzeczywiste wartości z giełdy",
+      formula: "Wartości zwrócone przez ExchangeService",
+      values: {
+        executedPrice: finalSellPrice.toFixed(2),
+        executedAmount: executedAmountNum.toFixed(8),
+        executedSellValue: executedSellValueNum.toFixed(2),
+        priceSource: exchangeResult.avgPrice ? "exchange (avgPrice)" : "currentPrice (fallback)",
+        amountSource: exchangeResult.executedQty ? "exchange (executedQty)" : "position.amount (fallback)"
+      },
+      result: executedSellValueNum
+    },
+    {
+      step: 5,
+      description: "Obliczenie zysku",
+      formula: "executedSellValue - buyValue",
+      values: {
+        executedSellValue: executedSellValueNum.toFixed(2),
+        buyValue: position.buyValue.toFixed(2),
+        profit: executedProfitNum.toFixed(2),
+        profitPercent: ((executedProfitNum / position.buyValue) * 100).toFixed(2) + "%"
+      },
+      result: executedProfitNum
+    }
+  ];
+
+  const sellCalculationDetails = {
+    summary: {
+      buyPrice: position.buyPrice.toFixed(2),
+      buyValue: position.buyValue.toFixed(2),
+      executedPrice: finalSellPrice.toFixed(2),
+      executedSellValue: executedSellValueNum.toFixed(2),
+      profit: executedProfitNum.toFixed(2),
+      profitPercent: ((executedProfitNum / position.buyValue) * 100).toFixed(2) + "%"
+    },
+    steps: sellCalculationSteps
+  };
+
   // Loguj zamknięcie pozycji long (sprzedaż) do pliku JSON
   await logBuyTransaction({
     type: "BUY_CLOSE",
@@ -983,6 +1235,7 @@ async function executeBuySell(currentPrice, position, state, settings) {
     status: "CLOSED",
     focusPrice: finalSellPrice,
     nextBuyTarget: state.nextBuyTarget,
+    calculationDetails: sellCalculationDetails,
   });
 
   // Zapisz zaktualizowany stan (włącznie z nextBuyTarget) do bazy danych
@@ -1262,6 +1515,216 @@ async function executeSellShort(currentPrice, state, settings) {
     `value=${executedValueNum}, trend=${currentTrend}→${state.sellTrendCounter} focus=${sellPriceNum}`,
   );
 
+  // Oblicz szczegółowe źródło kwoty sprzedaży short - krok po kroku
+  const sellTrendPercent = getTrendPercent(currentTrend, settings, false);
+  const sellMinValuePer1Percent = settings.sellConditions?.minValuePer1Percent || 200;
+  
+  // Krok 1: Oblicz podstawową wartość
+  const sellBaseValueStep1 = sellMinValuePer1Percent * sellTrendPercent.toNumber();
+  let sellCalculationSteps = [
+    {
+      step: 1,
+      description: "Podstawowa wartość na 1%",
+      formula: `minValuePer1Percent × trendPercent`,
+      values: {
+        minValuePer1Percent: sellMinValuePer1Percent,
+        trendPercent: sellTrendPercent.toNumber().toFixed(4),
+        result: sellBaseValueStep1.toFixed(2)
+      },
+      result: sellBaseValueStep1
+    }
+  ];
+
+  // Krok 2: Sprawdź faktyczny wzrost ceny
+  let actualUpPercent = null;
+  try {
+    const focus = new Decimal(state.currentFocusPrice || 0);
+    if (!focus.isZero()) {
+      actualUpPercent = currentPrice.minus(focus).div(focus).mul(100).toDecimalPlaces(1, Decimal.ROUND_DOWN).toNumber();
+    }
+  } catch {}
+  
+  sellCalculationSteps.push({
+    step: 2,
+    description: "Faktyczny wzrost ceny od focus",
+    formula: `(currentPrice - focusPrice) / focusPrice × 100`,
+    values: {
+      focusPrice: (state.currentFocusPrice || 0).toFixed(2),
+      currentPrice: currentPrice.toNumber().toFixed(2),
+      actualUpPercent: actualUpPercent != null ? actualUpPercent.toFixed(2) + "%" : "brak focus",
+      trendPercentFromSettings: sellTrendPercent.toNumber().toFixed(4) + "%",
+      effectiveTrendPercent: effectiveTrendPercent.toNumber().toFixed(4) + "%",
+      note: actualUpPercent != null && actualUpPercent > sellTrendPercent.toNumber() 
+        ? "Użyto faktycznego wzrostu (większy niż trend z ustawień)" 
+        : "Użyto trendPercent z ustawień"
+    },
+    result: effectiveTrendPercent.toNumber()
+  });
+
+  // Krok 3: Dodatkowe wartości z progów cenowych
+  let sellAdditionalValueStep3 = 0;
+  let sellAdditionalThreshold = null;
+  const additionalSellValues = settings.additionalSellValues;
+  if (additionalSellValues && additionalSellValues.length > 0) {
+    for (const threshold of additionalSellValues) {
+      if (matchesThreshold(currentPrice, threshold)) {
+        const addVal = new Decimal(threshold.value || 0);
+        const addComponent = addVal.mul(sellTrendPercent);
+        sellAdditionalValueStep3 = addComponent.toNumber();
+        sellAdditionalThreshold = threshold;
+        break;
+      }
+    }
+  }
+
+  if (sellAdditionalValueStep3 > 0) {
+    sellCalculationSteps.push({
+      step: 3,
+      description: "Dodatkowa wartość z progu cenowego",
+      formula: `additionalValue × trendPercent`,
+      values: {
+        priceRange: `[${sellAdditionalThreshold?.minPrice ?? "-"}, ${sellAdditionalThreshold?.maxPrice ?? "-"}]`,
+        additionalValue: sellAdditionalThreshold?.value || 0,
+        trendPercent: sellTrendPercent.toNumber().toFixed(4),
+        result: sellAdditionalValueStep3.toFixed(2)
+      },
+      result: sellAdditionalValueStep3
+    });
+  }
+
+  // Krok 4: Wartość przed ograniczeniem max
+  const sellValueBeforeMax = sellBaseValueStep1 + sellAdditionalValueStep3;
+  sellCalculationSteps.push({
+    step: sellCalculationSteps.length + 1,
+    description: "Wartość przed ograniczeniem maksymalnym",
+    formula: `baseValue + additionalValue`,
+    values: {
+      baseValue: sellBaseValueStep1.toFixed(2),
+      additionalValue: sellAdditionalValueStep3.toFixed(2),
+      result: sellValueBeforeMax.toFixed(2)
+    },
+    result: sellValueBeforeMax
+  });
+
+  // Krok 5: Ograniczenie maksymalnej wartości
+  let sellMaxValueStep5 = null;
+  let sellMaxThreshold = null;
+  const maxSellValues = settings.maxSellPerTransaction;
+  if (maxSellValues && maxSellValues.length > 0) {
+    for (const threshold of maxSellValues) {
+      if (matchesThreshold(currentPrice, threshold)) {
+        const maxVal = new Decimal(threshold.value || 10000);
+        if (sellValueBeforeMax > maxVal.toNumber()) {
+          sellMaxValueStep5 = maxVal.toNumber();
+          sellMaxThreshold = threshold;
+        }
+        break;
+      }
+    }
+  }
+
+  if (sellMaxValueStep5 != null) {
+    sellCalculationSteps.push({
+      step: sellCalculationSteps.length + 1,
+      description: "Ograniczenie maksymalnej wartości",
+      formula: `min(wartośćPrzedMax, maxValue)`,
+      values: {
+        valueBeforeMax: sellValueBeforeMax.toFixed(2),
+        maxValue: sellMaxValueStep5.toFixed(2),
+        priceRange: `[${sellMaxThreshold?.minPrice ?? "-"}, ${sellMaxThreshold?.maxPrice ?? "-"}]`,
+        result: sellMaxValueStep5.toFixed(2),
+        note: "Wartość została ograniczona do maksimum"
+      },
+      result: sellMaxValueStep5
+    });
+  }
+
+  // Krok 6: Finalna obliczona wartość transakcji
+  const sellFinalCalculatedValue = sellMaxValueStep5 != null ? sellMaxValueStep5 : sellValueBeforeMax;
+  sellCalculationSteps.push({
+    step: sellCalculationSteps.length + 1,
+    description: "Finalna obliczona wartość transakcji",
+    formula: sellMaxValueStep5 != null ? "wartośćPrzedMax ograniczona do maxValue" : "baseValue + additionalValue",
+    values: {
+      result: sellFinalCalculatedValue.toFixed(2)
+    },
+    result: sellFinalCalculatedValue
+  });
+
+  // Krok 7: Obliczona ilość (przed sprawdzeniem salda)
+  const sellCalculatedAmountBeforeBalance = sellFinalCalculatedValue / currentPrice.toNumber();
+  sellCalculationSteps.push({
+    step: sellCalculationSteps.length + 1,
+    description: "Obliczona ilość (przed sprawdzeniem salda)",
+    formula: `transactionValue / currentPrice`,
+    values: {
+      transactionValue: sellFinalCalculatedValue.toFixed(2),
+      currentPrice: currentPrice.toNumber().toFixed(2),
+      result: sellCalculatedAmountBeforeBalance.toFixed(8)
+    },
+    result: sellCalculatedAmountBeforeBalance
+  });
+
+  // Krok 8: Sprawdzenie salda portfela
+  const amountWasAdjusted = amount.lt(new Decimal(sellCalculatedAmountBeforeBalance));
+  sellCalculationSteps.push({
+    step: sellCalculationSteps.length + 1,
+    description: "Sprawdzenie salda portfela",
+    formula: "walletBalance - walletProtection",
+    values: {
+      walletBalance: walletBalance.toNumber().toFixed(8),
+      walletProtection: walletProtection.toNumber().toFixed(8),
+      availableBalance: availableBalance.toNumber().toFixed(8),
+      calculatedAmount: sellCalculatedAmountBeforeBalance.toFixed(8),
+      finalAmount: amount.toNumber().toFixed(8),
+      adjusted: amountWasAdjusted ? "TAK - ilość przycięta do dostępnego salda" : "NIE - wystarczające saldo"
+    },
+    result: amount.toNumber()
+  });
+
+  // Krok 9: Zaktualizowana wartość po przycięciu ilości
+  const sellFinalTransactionValue = amount.mul(currentPrice).toNumber();
+  sellCalculationSteps.push({
+    step: sellCalculationSteps.length + 1,
+    description: "Zaktualizowana wartość po przycięciu ilości",
+    formula: `finalAmount × currentPrice`,
+    values: {
+      finalAmount: amount.toNumber().toFixed(8),
+      currentPrice: currentPrice.toNumber().toFixed(2),
+      result: sellFinalTransactionValue.toFixed(2)
+    },
+    result: sellFinalTransactionValue
+  });
+
+  // Krok 10: Rzeczywiste wartości z giełdy
+  sellCalculationSteps.push({
+    step: sellCalculationSteps.length + 1,
+    description: "Rzeczywiste wartości z giełdy",
+    formula: "Wartości zwrócone przez ExchangeService",
+    values: {
+      executedPrice: sellPriceNum.toFixed(2),
+      executedAmount: executedAmountNum.toFixed(8),
+      executedValue: executedValueNum.toFixed(2),
+      priceSource: exchangeResult.avgPrice ? "exchange (avgPrice)" : "currentPrice (fallback)",
+      amountSource: exchangeResult.executedQty ? "exchange (executedQty)" : (amountWasAdjusted ? "availableBalance" : "calculated")
+    },
+    result: executedValueNum
+  });
+
+  const sellCalculationDetails = {
+    summary: {
+      trend: currentTrend,
+      trendPercent: sellTrendPercent.toNumber().toFixed(4) + "%",
+      effectiveTrendPercent: effectiveTrendPercent.toNumber().toFixed(4) + "%",
+      calculatedTransactionValue: sellFinalTransactionValue.toFixed(2),
+      executedValue: executedValueNum.toFixed(2),
+      currentPrice: currentPrice.toNumber().toFixed(2),
+      executedPrice: sellPriceNum.toFixed(2),
+      amountAdjusted: amountWasAdjusted
+    },
+    steps: sellCalculationSteps
+  };
+
   // Loguj transakcję sprzedaży short do pliku JSON
   await logSellTransaction({
     type: "SELL_SHORT",
@@ -1276,6 +1739,7 @@ async function executeSellShort(currentPrice, state, settings) {
     status: "OPEN",
     focusPrice: sellPriceNum,
     nextSellTarget: state.nextSellTarget,
+    calculationDetails: sellCalculationDetails,
   });
 
   // Zapisz zaktualizowany stan (włącznie z nextSellTarget) do bazy danych
@@ -1542,6 +2006,80 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
     `profit=${executedProfitNum}, trend→${state.sellTrendCounter} focus=${buybackPriceNum}`,
   );
 
+  // Oblicz szczegółowe źródło kwoty odkupu short - krok po kroku
+  const buybackCalculationSteps = [
+    {
+      step: 1,
+      description: "Dane z pozycji sprzedaży short",
+      formula: "Zapamiętane wartości z momentu sprzedaży",
+      values: {
+        sellPrice: position.sellPrice.toFixed(2),
+        sellAmount: position.amount.toFixed(8),
+        sellValue: position.sellValue.toFixed(2)
+      },
+      result: position.sellValue
+    },
+    {
+      step: 2,
+      description: "Aktualna cena rynkowa",
+      formula: "Cena pobrana z PriceFeedService",
+      values: {
+        currentPrice: currentPrice.toNumber().toFixed(2),
+        source: "PriceFeedService.getPrice()"
+      },
+      result: currentPrice.toNumber()
+    },
+    {
+      step: 3,
+      description: "Obliczona wartość odkupu",
+      formula: "sellAmount × currentPrice",
+      values: {
+        sellAmount: position.amount.toFixed(8),
+        currentPrice: currentPrice.toNumber().toFixed(2),
+        calculatedBuybackValue: buybackValue.toNumber().toFixed(2)
+      },
+      result: buybackValue.toNumber()
+    },
+    {
+      step: 4,
+      description: "Rzeczywiste wartości z giełdy",
+      formula: "Wartości zwrócone przez ExchangeService",
+      values: {
+        executedPrice: buybackPriceNum.toFixed(2),
+        executedAmount: executedAmountNum.toFixed(8),
+        executedBuybackValue: executedBuybackValueNum.toFixed(2),
+        priceSource: exchangeResult.avgPrice ? "exchange (avgPrice)" : "currentPrice (fallback)",
+        amountSource: exchangeResult.executedQty ? "exchange (executedQty)" : "position.amount (fallback)"
+      },
+      result: executedBuybackValueNum
+    },
+    {
+      step: 5,
+      description: "Obliczenie zysku",
+      formula: "sellValue - executedBuybackValue",
+      values: {
+        sellValue: position.sellValue.toFixed(2),
+        executedBuybackValue: executedBuybackValueNum.toFixed(2),
+        profit: executedProfitNum.toFixed(2),
+        profitPercent: ((executedProfitNum / position.sellValue) * 100).toFixed(2) + "%",
+        note: "Zysk = różnica między wartością sprzedaży a wartością odkupu"
+      },
+      result: executedProfitNum
+    }
+  ];
+
+  const buybackCalculationDetails = {
+    summary: {
+      sellPrice: position.sellPrice.toFixed(2),
+      sellValue: position.sellValue.toFixed(2),
+      executedPrice: buybackPriceNum.toFixed(2),
+      executedBuybackValue: executedBuybackValueNum.toFixed(2),
+      profit: executedProfitNum.toFixed(2),
+      profitPercent: ((executedProfitNum / position.sellValue) * 100).toFixed(2) + "%"
+    },
+    steps: buybackCalculationSteps
+  };
+
   // Loguj zamknięcie pozycji short (odkup) do pliku JSON
   await logSellTransaction({
     type: "SELL_CLOSE",
@@ -1558,6 +2096,7 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
     status: "CLOSED",
     focusPrice: buybackPriceNum,
     nextSellTarget: state.nextSellTarget,
+    calculationDetails: buybackCalculationDetails,
   });
 
   // Zapisz zaktualizowany stan (włącznie z nextSellTarget) do bazy danych
