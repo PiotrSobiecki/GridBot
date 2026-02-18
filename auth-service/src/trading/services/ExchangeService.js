@@ -115,11 +115,13 @@ async function validateSymbol(symbol) {
 
 /**
  * Zaokrągla quantity zgodnie z stepSize z exchangeInfo
+ * Jeśli wartość transakcji po zaokrągleniu w dół byłaby < 5 USDT, zaokrągla w górę
  * @param {Decimal} quantity - ilość do zaokrąglenia
  * @param {string|null} stepSize - stepSize z exchangeInfo (np. "0.00001")
+ * @param {Decimal|null} currentPrice - aktualna cena (do sprawdzenia wartości transakcji)
  * @returns {string} - zaokrąglona ilość jako string
  */
-function roundQuantityToStepSize(quantity, stepSize) {
+function roundQuantityToStepSize(quantity, stepSize, currentPrice = null) {
   if (!stepSize || stepSize === "0") {
     // Fallback: zaokrąglij do 8 miejsc (jak w GridAlgorithmService)
     return quantity.toDecimalPlaces(8, Decimal.ROUND_DOWN).toString();
@@ -133,7 +135,26 @@ function roundQuantityToStepSize(quantity, stepSize) {
   // Upewnij się, że zaokrąglona wartość jest wielokrotnością stepSize
   // Oblicz ile "kroków" stepSize mieści się w quantity (zaokrąglij w dół)
   const steps = quantity.div(stepDecimal).floor();
-  const finalQty = steps.mul(stepDecimal);
+  let finalQty = steps.mul(stepDecimal);
+
+  // Sprawdź czy wartość transakcji po zaokrągleniu w dół jest >= 5 USDT
+  // Jeśli nie, zaokrąglij w górę (dodaj jeden krok stepSize)
+  if (currentPrice && currentPrice.gt(0)) {
+    const minOrderValue = new Decimal(5); // Minimum 5 USDT dla AsterDex
+    const valueAfterRoundDown = finalQty.mul(currentPrice);
+    
+    if (valueAfterRoundDown.lt(minOrderValue)) {
+      // Zaokrąglij w górę - dodaj jeden krok stepSize
+      const stepsUp = steps.plus(1);
+      finalQty = stepsUp.mul(stepDecimal);
+      
+      const valueAfterRoundUp = finalQty.mul(currentPrice);
+      console.log(
+        `📊 SELL quantity rounded UP: qty=${quantity.toString()} -> ${finalQty.toString()} ` +
+        `(value: ${valueAfterRoundDown.toFixed(2)} -> ${valueAfterRoundUp.toFixed(2)} USDT, min=5 USDT)`
+      );
+    }
+  }
 
   // Zwróć jako string z odpowiednią precyzją (usunięcie niepotrzebnych zer)
   return finalQty.toString();
@@ -311,13 +332,17 @@ export async function placeSpotSell(
     const precision = await getSymbolPrecision(symbol);
     const roundedQuantity = roundQuantityToStepSize(
       baseAmount,
-      precision.stepSize
+      precision.stepSize,
+      expectedPrice // Przekaż cenę, żeby sprawdzić czy wartość >= 5 USDT
     );
 
+    // Sprawdź wartość transakcji po zaokrągleniu
+    const roundedQtyDecimal = new Decimal(roundedQuantity);
+    const orderValue = roundedQtyDecimal.mul(expectedPrice);
     console.log(
       `📊 SELL precision for ${symbol}: stepSize=${
         precision.stepSize
-      }, qty=${baseAmount.toString()} -> ${roundedQuantity}`
+      }, qty=${baseAmount.toString()} -> ${roundedQuantity}, value=${orderValue.toFixed(2)} USDT`
     );
 
     // Realne zlecenie MARKET SELL na AsterDex
