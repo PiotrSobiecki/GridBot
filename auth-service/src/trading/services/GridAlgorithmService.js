@@ -2242,6 +2242,15 @@ function calculateTransactionValue(
       if (matchesThreshold(currentPrice, threshold)) {
         const maxVal = new Decimal(threshold.value || 10000);
         if (baseValue.gt(maxVal)) {
+          if (DEBUG_CONDITIONS) {
+            console.log(
+              `🔍 ${isBuy ? "BUY" : "SELL"} max value applied: ` +
+                `price=${currentPrice.toString()} in [${threshold.minPrice ?? "-"}, ${
+                  threshold.maxPrice ?? "-"
+                }] ` +
+                `txBefore=${baseValue.toString()} maxValue=${maxVal.toString()} → txAfter=${maxVal.toString()}`,
+            );
+          }
           baseValue = maxVal;
         }
         break;
