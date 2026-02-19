@@ -57,9 +57,9 @@ export class UserSettings {
           id: uuidv4(),
           name: "Zlecenie 1",
           isActive: false,
-          refreshInterval: 5,
+          refreshInterval: 30, // 30 sekund
           minProfitPercent: 0.5,
-          focusPrice: 94000,
+          focusPrice: 0, // Będzie ustawione na aktualną cenę przy tworzeniu z frontendu
           timeToNewFocus: 0,
           baseAsset: "BTC",
           // Na spocie jako stable używamy USDT
@@ -85,13 +85,13 @@ export class UserSettings {
             checkFeeProfit: true,
           },
           buyConditions: {
-            minValuePer1Percent: 200,
-            priceThreshold: 100000,
+            minValuePer1Percent: 20, // 20 USD
+            priceThreshold: 0, // Progi na 0
             checkThresholdIfProfitable: true,
           },
           sellConditions: {
-            minValuePer1Percent: 200,
-            priceThreshold: 89000,
+            minValuePer1Percent: 20, // 20 USD
+            priceThreshold: 0, // Progi na 0
             checkThresholdIfProfitable: true,
           },
           trendPercents: [
@@ -100,40 +100,12 @@ export class UserSettings {
             { trend: 2, buyPercent: 0.6, sellPercent: 0.6 },
             { trend: 5, buyPercent: 0.1, sellPercent: 0.1 },
           ],
-          additionalBuyValues: [
-            { condition: "less", price: 104000, value: 50 },
-            { condition: "greaterEqual", price: 100000, value: 70 },
-            { condition: "greater", price: 89000, value: 250 },
-          ],
-          additionalSellValues: [
-            { condition: "less", price: 104000, value: 150 },
-            { condition: "greaterEqual", price: 100000, value: 100 },
-            { condition: "greater", price: 89000, value: 50 },
-          ],
-          maxBuyPerTransaction: [
-            // zakresy: minPrice <= cena < maxPrice
-            { minPrice: 0, maxPrice: 89000, value: 2000 },
-            { minPrice: 89000, maxPrice: 100000, value: 700 },
-            { minPrice: 100000, maxPrice: null, value: 500 },
-          ],
-          maxSellPerTransaction: [
-            { minPrice: 0, maxPrice: 89000, value: 1500 },
-            { minPrice: 89000, maxPrice: 100000, value: 1000 },
-            { minPrice: 100000, maxPrice: null, value: 500 },
-          ],
-          buySwingPercent: [
-            // zakresy cen: minPrice <= cena < maxPrice => min wahanie %
-            { minPrice: 0, maxPrice: 90000, value: 0.1 },
-            { minPrice: 90000, maxPrice: 95000, value: 0.2 },
-            { minPrice: 95000, maxPrice: 100000, value: 0.5 },
-            { minPrice: 100000, maxPrice: null, value: 1 },
-          ],
-          sellSwingPercent: [
-            { minPrice: 0, maxPrice: 90000, value: 0.1 },
-            { minPrice: 90000, maxPrice: 95000, value: 0.2 },
-            { minPrice: 95000, maxPrice: 100000, value: 0.5 },
-            { minPrice: 100000, maxPrice: null, value: 1 },
-          ],
+          additionalBuyValues: [], // Puste
+          additionalSellValues: [], // Puste
+          maxBuyPerTransaction: [], // Puste
+          maxSellPerTransaction: [], // Puste
+          buySwingPercent: [], // Puste
+          sellSwingPercent: [], // Puste
         },
       ];
     }

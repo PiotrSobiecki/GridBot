@@ -62,10 +62,11 @@ function symbolMatchesExchange(symbolFromExchange, symbolWeWant, exchange) {
  * Pobiera exchangeInfo dla symbolu (cache'uje przez 5 minut)
  * @param {string} symbol - np. "BTCUSDT"
  * @param {string} walletAddress - adres portfela (do określenia giełdy)
+ * @param {string|null} forcedExchange - wymuś konkretną giełdę, jeśli null używa globalnej z UserSettings
  * @returns {Promise<{stepSize?: string, tickSize?: string}>}
  */
-async function getSymbolPrecision(symbol, walletAddress = null) {
-  const exchange = await getExchange(walletAddress);
+async function getSymbolPrecision(symbol, walletAddress = null, forcedExchange = null) {
+  const exchange = forcedExchange || await getExchange(walletAddress);
   const exchangeService = getExchangeService(exchange);
   
   const now = Date.now();
@@ -122,10 +123,11 @@ async function getSymbolPrecision(symbol, walletAddress = null) {
  * Sprawdza czy symbol istnieje w exchangeInfo i zwraca informacje o dostępnych symbolach
  * @param {string} symbol - np. "XRPUSDT"
  * @param {string} walletAddress - adres portfela (do określenia giełdy)
+ * @param {string|null} forcedExchange - wymuś konkretną giełdę, jeśli null używa globalnej z UserSettings
  * @returns {Promise<{valid: boolean, symbolInfo?: object, availableSymbols?: string[], error?: string}>}
  */
-async function validateSymbol(symbol, walletAddress = null) {
-  const exchange = await getExchange(walletAddress);
+async function validateSymbol(symbol, walletAddress = null, forcedExchange = null) {
+  const exchange = forcedExchange || await getExchange(walletAddress);
   const exchangeService = getExchangeService(exchange);
   
   const now = Date.now();
@@ -275,13 +277,15 @@ function logPaperModeOnce() {
  * @param {string} symbol - symbol pary (np. BTCUSDC)
  * @param {Decimal} quoteAmount - ilość quote currency do wydania (np. 1000 USDC)
  * @param {Decimal} expectedPrice - oczekiwana cena (dla logowania)
+ * @param {string|null} forcedExchange - wymuś konkretną giełdę (np. "bingx" lub "asterdex"), jeśli null używa globalnej z UserSettings
  * @returns {Promise<{success: boolean, orderId?: string, executedQty?: Decimal, avgPrice?: Decimal, error?: string}>}
  */
 export async function placeSpotBuy(
   walletAddress,
   symbol,
   quoteAmount,
-  expectedPrice
+  expectedPrice,
+  forcedExchange = null
 ) {
   logPaperModeOnce();
   if (isPaperTrading()) {
@@ -290,12 +294,13 @@ export async function placeSpotBuy(
   }
 
   try {
-    const exchange = await getExchange(walletAddress);
+    // Użyj wymuszonej giełdy (z zlecenia) lub pobierz globalną z UserSettings
+    const exchange = forcedExchange || await getExchange(walletAddress);
     const exchangeService = getExchangeService(exchange);
     const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
     
-    // Walidacja symbolu przed wysłaniem zlecenia
-    const validation = await validateSymbol(symbol, walletAddress);
+    // Walidacja symbolu przed wysłaniem zlecenia (użyj wymuszonej giełdy jeśli podana)
+    const validation = await validateSymbol(symbol, walletAddress, exchange);
     if (!validation.valid) {
       console.error(`❌ Invalid symbol ${symbol}:`, validation.error);
       return {
@@ -304,8 +309,8 @@ export async function placeSpotBuy(
       };
     }
 
-    // Pobierz precyzję dla symbolu (dla quoteOrderQty)
-    const precision = await getSymbolPrecision(symbol, walletAddress);
+    // Pobierz precyzję dla symbolu (dla quoteOrderQty) - użyj wymuszonej giełdy jeśli podana
+    const precision = await getSymbolPrecision(symbol, walletAddress, exchange);
     const roundedQuoteQty = roundQuoteOrderQty(
       quoteAmount,
       precision.quotePrecision
@@ -361,7 +366,7 @@ export async function placeSpotBuy(
       error: "Order placed but no orderId returned",
     };
   } catch (error) {
-    const exchange = await getExchange(walletAddress);
+    const exchange = forcedExchange || await getExchange(walletAddress);
     const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
     console.error(`❌ Failed to place BUY order on ${exchangeName}:`, error.message);
     return {
@@ -377,13 +382,15 @@ export async function placeSpotBuy(
  * @param {string} symbol - symbol pary (np. BTCUSDC)
  * @param {Decimal} baseAmount - ilość base currency do sprzedania (np. 0.01 BTC)
  * @param {Decimal} expectedPrice - oczekiwana cena (dla logowania)
+ * @param {string|null} forcedExchange - wymuś konkretną giełdę (np. "bingx" lub "asterdex"), jeśli null używa globalnej z UserSettings
  * @returns {Promise<{success: boolean, orderId?: string, executedQty?: Decimal, avgPrice?: Decimal, error?: string}>}
  */
 export async function placeSpotSell(
   walletAddress,
   symbol,
   baseAmount,
-  expectedPrice
+  expectedPrice,
+  forcedExchange = null
 ) {
   logPaperModeOnce();
   if (isPaperTrading()) {
@@ -392,7 +399,8 @@ export async function placeSpotSell(
   }
 
   try {
-    const exchange = await getExchange(walletAddress);
+    // Użyj wymuszonej giełdy (z zlecenia) lub pobierz globalną z UserSettings
+    const exchange = forcedExchange || await getExchange(walletAddress);
     const exchangeService = getExchangeService(exchange);
     const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
     
@@ -479,7 +487,7 @@ export async function placeSpotSell(
       error: "Order placed but no orderId returned",
     };
   } catch (error) {
-    const exchange = await getExchange(walletAddress);
+    const exchange = forcedExchange || await getExchange(walletAddress);
     const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
     console.error(`❌ Failed to place SELL order on ${exchangeName}:`, error.message);
     return {

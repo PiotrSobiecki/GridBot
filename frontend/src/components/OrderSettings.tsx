@@ -438,11 +438,37 @@ export default function OrderSettings({
                 label="5. Krypto (BASE)"
                 value={localOrder.baseAsset || localOrder.sell?.currency || "BTC"}
                 options={baseAssets}
-                onChange={(v) => {
+                onChange={async (v) => {
                   // Ustaw baseAsset i sell.currency jednocześnie
+                  // Pobierz aktualną cenę dla nowego krypto
+                  const quoteAsset = localOrder.quoteAsset || localOrder.buy?.currency || "USDT";
+                  const symbol = `${v}${quoteAsset}`;
+                  
+                  // Spróbuj pobrać cenę ze store
+                  let currentPrice = prices[symbol]?.price || 0;
+                  
+                  // Jeśli cena nie jest w store, spróbuj pobrać z API
+                  if (!currentPrice && walletAddress) {
+                    try {
+                      const priceData = await api.getPrices(walletAddress);
+                      const priceInfo = priceData[symbol];
+                      if (priceInfo) {
+                        currentPrice = typeof priceInfo === "object" && priceInfo !== null && "price" in priceInfo
+                          ? (typeof priceInfo.price === "string" ? parseFloat(priceInfo.price) : Number(priceInfo.price))
+                          : (typeof priceInfo === "string" ? parseFloat(priceInfo) : Number(priceInfo));
+                      }
+                    } catch (e) {
+                      console.warn(`Failed to fetch price for ${symbol}:`, e);
+                    }
+                  }
+                  
                   setLocalOrder((prev) => {
                     const updated = { ...prev } as any;
                     updated.baseAsset = v;
+                    // Aktualizuj focusPrice do aktualnej ceny wybranego krypto
+                    if (currentPrice > 0) {
+                      updated.focusPrice = currentPrice;
+                    }
                     if (updated.sell) {
                       updated.sell = { ...updated.sell, currency: v };
                     } else {
@@ -456,9 +482,43 @@ export default function OrderSettings({
                 label="6. Stable (QUOTE)"
                 value={localOrder.quoteAsset || localOrder.buy.currency}
                 options={quoteAssets}
-                onChange={(v) => {
-                  updateField("quoteAsset", v);
-                  updateField("buy.currency", v);
+                onChange={async (v) => {
+                  // Pobierz aktualną cenę dla nowej pary BASE/QUOTE
+                  const baseAsset = localOrder.baseAsset || localOrder.sell?.currency || "BTC";
+                  const symbol = `${baseAsset}${v}`;
+                  
+                  // Spróbuj pobrać cenę ze store
+                  let currentPrice = prices[symbol]?.price || 0;
+                  
+                  // Jeśli cena nie jest w store, spróbuj pobrać z API
+                  if (!currentPrice && walletAddress) {
+                    try {
+                      const priceData = await api.getPrices(walletAddress);
+                      const priceInfo = priceData[symbol];
+                      if (priceInfo) {
+                        currentPrice = typeof priceInfo === "object" && priceInfo !== null && "price" in priceInfo
+                          ? (typeof priceInfo.price === "string" ? parseFloat(priceInfo.price) : Number(priceInfo.price))
+                          : (typeof priceInfo === "string" ? parseFloat(priceInfo) : Number(priceInfo));
+                      }
+                    } catch (e) {
+                      console.warn(`Failed to fetch price for ${symbol}:`, e);
+                    }
+                  }
+                  
+                  setLocalOrder((prev) => {
+                    const updated = { ...prev } as any;
+                    updated.quoteAsset = v;
+                    // Aktualizuj focusPrice do aktualnej ceny wybranej pary
+                    if (currentPrice > 0) {
+                      updated.focusPrice = currentPrice;
+                    }
+                    if (updated.buy) {
+                      updated.buy = { ...updated.buy, currency: v };
+                    } else {
+                      updated.buy = { currency: v, walletProtection: 0, mode: "walletLimit", maxValue: 0, addProfit: false };
+                    }
+                    return updated;
+                  });
                 }}
               />
               {/* Aktualna cena - nieedytowalne */}

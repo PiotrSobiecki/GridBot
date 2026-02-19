@@ -607,13 +607,16 @@ async function executeBuy(currentPrice, state, settings) {
   // Na spocie jako stable używamy USDT
   const quoteAsset = settings.quoteAsset || settings.buy?.currency || "USDT";
   const symbol = `${baseAsset}${quoteAsset}`;
+  const exchange = settings.exchange || "asterdex";
 
   // Wykonaj zlecenie przez ExchangeService (realne lub paper-trading)
+  // Przekaż exchange z ustawień zlecenia (może być inny niż globalna giełda użytkownika)
   const exchangeResult = await ExchangeService.placeSpotBuy(
     state.walletAddress,
     symbol,
     transactionValue,
     currentPrice,
+    exchange, // Przekaż giełdę z zlecenia
   );
 
   if (!exchangeResult.success) {
@@ -1057,13 +1060,16 @@ async function executeBuySell(currentPrice, position, state, settings) {
   const baseAsset = settings.baseAsset || settings.sell?.currency || "BTC";
   const quoteAsset = settings.quoteAsset || settings.buy?.currency || "USDT";
   const symbol = `${baseAsset}${quoteAsset}`;
+  const exchange = settings.exchange || "asterdex";
 
   // Wykonaj zlecenie przez ExchangeService
+  // Przekaż exchange z ustawień zlecenia (może być inny niż globalna giełda użytkownika)
   const exchangeResult = await ExchangeService.placeSpotSell(
     state.walletAddress,
     symbol,
     amount,
     currentPrice,
+    exchange, // Przekaż giełdę z zlecenia
   );
 
   if (!exchangeResult.success) {
@@ -1442,13 +1448,16 @@ async function executeSellShort(currentPrice, state, settings) {
   const baseAsset = settings.baseAsset || settings.sell?.currency || "BTC";
   const quoteAsset = settings.quoteAsset || settings.buy?.currency || "USDT";
   const symbol = `${baseAsset}${quoteAsset}`;
+  // exchange jest już zadeklarowane wcześniej w tej funkcji (linia 1375)
 
   // Wykonaj zlecenie przez ExchangeService
+  // Przekaż exchange z ustawień zlecenia (może być inny niż globalna giełda użytkownika)
   const exchangeResult = await ExchangeService.placeSpotSell(
     state.walletAddress,
     symbol,
     amount,
     currentPrice,
+    exchange, // Przekaż giełdę z zlecenia (już zadeklarowane wcześniej)
   );
 
   if (!exchangeResult.success) {
@@ -1929,13 +1938,16 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
   const baseAsset = settings.baseAsset || settings.sell?.currency || "BTC";
   const quoteAsset = settings.quoteAsset || settings.buy?.currency || "USDT";
   const symbol = `${baseAsset}${quoteAsset}`;
+  const exchange = settings.exchange || "asterdex";
 
   // Wykonaj zlecenie BUY przez ExchangeService (odkup short)
+  // Przekaż exchange z ustawień zlecenia (może być inny niż globalna giełda użytkownika)
   const exchangeResult = await ExchangeService.placeSpotBuy(
     state.walletAddress,
     symbol,
     buybackValue,
     currentPrice,
+    exchange, // Przekaż giełdę z zlecenia
   );
 
   if (!exchangeResult.success) {

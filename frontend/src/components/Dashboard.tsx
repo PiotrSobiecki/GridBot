@@ -25,9 +25,9 @@ import type { OrderSettings as OrderSettingsType } from "../types";
 const defaultOrder: Omit<OrderSettingsType, "_id"> = {
   name: "Nowe Zlecenie",
   isActive: false,
-  refreshInterval: 5,
+  refreshInterval: 30, // 30 sekund
   minProfitPercent: 0.5,
-  focusPrice: 94000,
+  focusPrice: 0, // Będzie ustawione na aktualną cenę przy tworzeniu
   exchange: "asterdex", // Domyślnie AsterDex, będzie nadpisane przy tworzeniu
   timeToNewFocus: 0,
   buyTrendCounter: 0,
@@ -58,13 +58,13 @@ const defaultOrder: Omit<OrderSettingsType, "_id"> = {
     checkFeeProfit: true,
   },
   buyConditions: {
-    minValuePer1Percent: 200,
-    priceThreshold: 100000,
+    minValuePer1Percent: 20, // 20 USD
+    priceThreshold: 0, // Progi na 0
     checkThresholdIfProfitable: true,
   },
   sellConditions: {
-    minValuePer1Percent: 200,
-    priceThreshold: 89000,
+    minValuePer1Percent: 20, // 20 USD
+    priceThreshold: 0, // Progi na 0
     checkThresholdIfProfitable: true,
   },
   trendPercents: [
@@ -74,42 +74,12 @@ const defaultOrder: Omit<OrderSettingsType, "_id"> = {
     { trend: 5, buyPercent: 0.5, sellPercent: 0.5 },
     { trend: 10, buyPercent: 0.1, sellPercent: 1 },
   ],
-  additionalBuyValues: [
-    // zakresy: cena od ... do ... => dodatkowa wartość
-    { minPrice: 0, maxPrice: 89000, value: 250 },
-    { minPrice: 89000, maxPrice: 100000, value: 70 },
-    { minPrice: 100000, maxPrice: null, value: 50 },
-  ],
-  additionalSellValues: [
-    { minPrice: 0, maxPrice: 89000, value: 50 },
-    { minPrice: 89000, maxPrice: 100000, value: 100 },
-    { minPrice: 100000, maxPrice: null, value: 150 },
-  ],
-  maxBuyPerTransaction: [
-    // zakresy: cena od ... do ... => MAX wartość transakcji
-    { minPrice: 0, maxPrice: 89000, value: 2000 },
-    { minPrice: 89000, maxPrice: 100000, value: 700 },
-    { minPrice: 100000, maxPrice: null, value: 500 },
-  ],
-  maxSellPerTransaction: [
-    // zakresy: cena od ... do ... => MAX wartość transakcji
-    { minPrice: 0, maxPrice: 89000, value: 1500 },
-    { minPrice: 89000, maxPrice: 100000, value: 1000 },
-    { minPrice: 100000, maxPrice: null, value: 500 },
-  ],
-  buySwingPercent: [
-    // zakresy cen: minPrice <= cena < maxPrice => min wahanie %
-    { minPrice: 0, maxPrice: 90000, value: 0.1 },
-    { minPrice: 90000, maxPrice: 95000, value: 0.2 },
-    { minPrice: 95000, maxPrice: 100000, value: 0.5 },
-    { minPrice: 100000, maxPrice: null, value: 1 },
-  ],
-  sellSwingPercent: [
-    { minPrice: 0, maxPrice: 90000, value: 0.1 },
-    { minPrice: 90000, maxPrice: 95000, value: 0.2 },
-    { minPrice: 95000, maxPrice: 100000, value: 0.5 },
-    { minPrice: 100000, maxPrice: null, value: 1 },
-  ],
+  additionalBuyValues: [], // Puste
+  additionalSellValues: [], // Puste
+  maxBuyPerTransaction: [], // Puste
+  maxSellPerTransaction: [], // Puste
+  buySwingPercent: [], // Puste
+  sellSwingPercent: [], // Puste
 };
 
 export default function Dashboard() {
@@ -305,10 +275,33 @@ export default function Dashboard() {
       setIsLoading(true);
       // Przypisz aktualną giełdę do nowego zlecenia
       const currentExchange = userSettings?.exchange || "asterdex";
+      
+      // Pobierz aktualną cenę dla baseAsset (np. BTCUSDT)
+      const baseAsset = defaultOrder.baseAsset || "BTC";
+      const quoteAsset = defaultOrder.quoteAsset || "USDT";
+      const symbol = `${baseAsset}${quoteAsset}`;
+      let currentPrice = useStore.getState().prices[symbol]?.price || 0;
+      
+      // Jeśli cena nie jest w store, spróbuj pobrać z API
+      if (!currentPrice && walletAddress) {
+        try {
+          const priceData = await api.getPrices(walletAddress);
+          const priceInfo = priceData[symbol];
+          if (priceInfo) {
+            currentPrice = typeof priceInfo === "object" && priceInfo !== null && "price" in priceInfo
+              ? (typeof priceInfo.price === "string" ? parseFloat(priceInfo.price) : Number(priceInfo.price))
+              : (typeof priceInfo === "string" ? parseFloat(priceInfo) : Number(priceInfo));
+          }
+        } catch (e) {
+          console.warn(`Failed to fetch price for ${symbol}:`, e);
+        }
+      }
+      
       const newOrder = await api.createOrder({
         ...defaultOrder,
         name: `Zlecenie ${orders.length + 1}`,
         exchange: currentExchange, // Przypisz aktualną giełdę
+        focusPrice: currentPrice || 0, // Ustaw aktualną cenę jako focusPrice
       });
 
       if (userSettings) {
