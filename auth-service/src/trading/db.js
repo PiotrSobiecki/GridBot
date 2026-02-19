@@ -207,6 +207,7 @@ if (usePostgres) {
       wallet_currencies TEXT DEFAULT '[]',
       orders TEXT DEFAULT '[]',
       api_config TEXT DEFAULT '{}',
+      exchange TEXT DEFAULT 'asterdex',
       created_at TEXT,
       updated_at TEXT
     );
@@ -217,6 +218,17 @@ if (usePostgres) {
     CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
     CREATE INDEX IF NOT EXISTS idx_user_settings_wallet ON user_settings(wallet_address);
   `);
+
+  // Migracje dla istniejących baz - dodaj kolumnę exchange jeśli nie istnieje
+  try {
+    await sqliteDb.exec("ALTER TABLE user_settings ADD COLUMN exchange TEXT DEFAULT 'asterdex';");
+    console.log('✅ Migration: Added exchange column to user_settings');
+  } catch (e) {
+    // Ignoruj jeśli kolumna już istnieje
+    if (!e.message.includes('duplicate column')) {
+      console.log('ℹ️ Migration: exchange column already exists or error:', e.message);
+    }
+  }
 
   db = sqliteDb;
   console.log('✅ SQLite database initialized');
@@ -284,6 +296,7 @@ async function initPostgresTables(pool) {
       wallet_currencies TEXT DEFAULT '[]',
       orders TEXT DEFAULT '[]',
       api_config TEXT DEFAULT '{}',
+      exchange VARCHAR(50) DEFAULT 'asterdex',
       created_at TEXT,
       updated_at TEXT
     );
@@ -294,6 +307,35 @@ async function initPostgresTables(pool) {
     CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
     CREATE INDEX IF NOT EXISTS idx_user_settings_wallet ON user_settings(wallet_address);
   `);
+
+  // Migracja dla Postgres - dodaj kolumnę exchange jeśli nie istnieje
+  try {
+    const checkResult = await pool.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'user_settings' AND column_name = 'exchange'
+    `);
+    
+    if (checkResult.rows.length === 0) {
+      await pool.query(`
+        ALTER TABLE user_settings ADD COLUMN exchange VARCHAR(50) DEFAULT 'asterdex';
+      `);
+      console.log('✅ Migration: Added exchange column to user_settings (Postgres)');
+      
+      // Aktualizuj istniejące rekordy
+      const updateResult = await pool.query(`
+        UPDATE user_settings SET exchange = 'asterdex' WHERE exchange IS NULL
+      `);
+      if (updateResult.rowCount > 0) {
+        console.log(`✅ Migration: Updated ${updateResult.rowCount} existing records with default exchange value`);
+      }
+    } else {
+      console.log('ℹ️ Migration: exchange column already exists in user_settings');
+    }
+  } catch (e) {
+    console.error('❌ Migration error:', e.message);
+    // Nie przerywamy działania - aplikacja może działać bez tej kolumny (fallback)
+  }
 }
 
 // Helper do synchronicznego/asynchronicznego wywołania

@@ -5,7 +5,29 @@ import * as PriceFeedService from "../trading/services/PriceFeedService.js";
 import * as WalletService from "../trading/services/WalletService.js";
 import * as GridSchedulerService from "../trading/services/GridSchedulerService.js";
 import * as AsterSpotService from "../trading/services/AsterSpotService.js";
-import UserSettings from "../models/UserSettings.js";
+import * as BingXService from "../trading/services/BingXService.js";
+import UserSettings from "../trading/models/UserSettings.js";
+
+/**
+ * Pobiera wybraną giełdę dla użytkownika
+ */
+async function getExchangeForWallet(walletAddress) {
+  if (!walletAddress) {
+    return "asterdex";
+  }
+  
+  try {
+    const settings = await UserSettings.findOne({
+      walletAddress: walletAddress.toLowerCase(),
+    });
+    
+    const exchange = settings?.exchange || "asterdex";
+    return exchange === "bingx" ? "bingx" : "asterdex";
+  } catch (e) {
+    console.warn(`⚠️ Failed to get exchange for wallet=${walletAddress}:`, e.message);
+    return "asterdex";
+  }
+}
 
 const router = express.Router();
 
@@ -303,25 +325,73 @@ router.post("/grid/calculate-sell-target", (req, res) => {
 });
 
 /**
- * Pobiera aktualne ceny
+ * Pobiera aktualne ceny (z wybranej giełdy użytkownika)
  */
-router.get("/prices", (req, res) => {
-  res.json(PriceFeedService.getAllPrices());
+router.get("/prices", async (req, res) => {
+  try {
+    const walletAddress = req.headers["x-wallet-address"];
+    
+    // Jeśli podano walletAddress, pobierz ceny z jego giełdy
+    if (walletAddress) {
+      const exchange = await getExchangeForWallet(walletAddress);
+      const exchangeService = exchange === "bingx" ? BingXService : AsterSpotService;
+      
+      // Pobierz ceny bezpośrednio z API wybranej giełdy (dla BingX wymagany signed request z walletAddress)
+      const tickers = await exchangeService.fetchAllTickerPrices(walletAddress);
+      const prices = {};
+      
+      tickers.forEach((t) => {
+        if (t.symbol && t.price) {
+          prices[t.symbol] = {
+            price: t.price,
+            priceChangePercent: t.priceChangePercent ?? null,
+          };
+        }
+      });
+      
+      console.log(`📊 Prices API: fetched from ${exchange} for wallet ${walletAddress}, ${Object.keys(prices).length} symbols`);
+      return res.json(prices);
+    }
+    
+    // Fallback: użyj globalnych cen z PriceFeedService (dla kompatybilności)
+    res.json(PriceFeedService.getAllPrices());
+  } catch (error) {
+    console.error("Error getting prices:", error);
+    // Fallback do PriceFeedService w przypadku błędu
+    res.json(PriceFeedService.getAllPrices());
+  }
 });
 
 /**
- * Pobiera cenę dla konkretnego symbolu
+ * Pobiera cenę dla konkretnego symbolu (z wybranej giełdy użytkownika)
  */
-router.get("/prices/:symbol", (req, res) => {
-  const { symbol } = req.params;
-  const price = PriceFeedService.getPrice(symbol);
-  const stale = PriceFeedService.isPriceStale(symbol);
+router.get("/prices/:symbol", async (req, res) => {
+  try {
+    const { symbol } = req.params;
+    const walletAddress = req.headers["x-wallet-address"];
+    
+    let price;
+    let stale = true;
+    
+    if (walletAddress) {
+      // Pobierz cenę z giełdy użytkownika
+      price = await PriceFeedService.getPrice(symbol, walletAddress);
+      stale = PriceFeedService.isPriceStale(symbol);
+    } else {
+      // Fallback: użyj globalnych cen
+      price = PriceFeedService.getPriceSync(symbol);
+      stale = PriceFeedService.isPriceStale(symbol);
+    }
 
-  res.json({
-    symbol: symbol.toUpperCase(),
-    price: price.toString(),
-    stale,
-  });
+    res.json({
+      symbol: symbol.toUpperCase(),
+      price: price.toString(),
+      stale,
+    });
+  } catch (error) {
+    console.error("Error getting price:", error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 /**
@@ -411,8 +481,8 @@ router.post("/grid/process-price/:orderId", async (req, res) => {
 // ============ WALLET API ============
 
 /**
- * Pobiera salda portfela
- * Najpierw próbuje pobrać rzeczywiste salda z AsterDex SPOT (`GET /api/v1/account`),
+ * Pobiera salda portfela z wybranej giełdy
+ * Najpierw próbuje pobrać rzeczywiste salda z wybranej giełdy,
  * a jeśli się nie uda, wraca do lokalnego, symulowanego portfela.
  */
 router.get("/wallet/balances", async (req, res) => {
@@ -423,41 +493,61 @@ router.get("/wallet/balances", async (req, res) => {
       return res.status(400).json({ error: "Missing X-Wallet-Address header" });
     }
 
+    // Pobierz wybraną giełdę dla tego portfela
+    const exchange = await getExchangeForWallet(walletAddress);
+    const exchangeService = exchange === "bingx" ? BingXService : AsterSpotService;
+    const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
+
     let balances = {};
 
     try {
-      // Prawdziwe salda z AsterDex SPOT
-      const account = await AsterSpotService.fetchSpotAccount(walletAddress);
+      // Prawdziwe salda z wybranej giełdy
+      const account = await exchangeService.fetchSpotAccount(walletAddress);
 
       if (Array.isArray(account?.balances)) {
         const externalBalances = {};
 
         account.balances.forEach((b) => {
-          const asset = b.asset;
-          const free = parseFloat(b.free || "0");
-          const locked = parseFloat(b.locked || "0");
+          // BingX może używać różnych nazw pól - sprawdź asset, coin, currency
+          const asset = b.asset || b.coin || b.currency;
+          // BingX może używać available zamiast free, locked może być freeze lub locked
+          const free = parseFloat(b.free || b.available || "0");
+          const locked = parseFloat(b.locked || b.freeze || b.frozen || "0");
           const total = free + locked;
 
+          console.log(`🔍 Parsing BingX balance: asset=${asset}, free=${free}, locked=${locked}, total=${total}`);
+
+          // Zapisuj wszystkie salda > 0 (nawet jeśli free=0 ale locked>0)
           if (asset && total > 0) {
             externalBalances[asset.toUpperCase()] = total.toString();
+            console.log(`✅ Added balance: ${asset.toUpperCase()} = ${total}`);
+          } else if (asset) {
+            console.log(`⏭️ Skipping balance ${asset}: total=${total} (free=${free}, locked=${locked})`);
           }
         });
+        
+        console.log(`💰 Final externalBalances for ${exchangeName}:`, JSON.stringify(externalBalances, null, 2));
 
         // Zsynchronizuj z wewnętrznym portfelem (używane przez algorytm/symulację)
-        await WalletService.syncBalances(walletAddress, externalBalances);
+        await WalletService.syncBalances(walletAddress, externalBalances, exchange);
         balances = externalBalances;
+        console.log(`💰 Wallet balances: fetched from ${exchangeName} for wallet ${walletAddress}`);
       } else {
         console.warn(
-          "⚠️ Aster SPOT account response bez pola balances – fallback do lokalnego portfela"
+          `⚠️ ${exchangeName} account response bez pola balances – fallback do lokalnego portfela. Response keys: ${Object.keys(account || {}).join(", ")}`
         );
-        balances = WalletService.getAllBalances(walletAddress);
+        // Loguj pełną odpowiedź dla debugowania
+        if (process.env.GRID_DEBUG_CONDITIONS) {
+          console.log(`🔍 Full ${exchangeName} account response:`, JSON.stringify(account, null, 2));
+        }
+        balances = await WalletService.getAllBalances(walletAddress, exchange);
       }
     } catch (e) {
       console.error(
-        "❌ Error fetching Aster SPOT balances, fallback to local wallet:",
+        `❌ Error fetching ${exchangeName} balances, fallback to local wallet:`,
         e.message
       );
-      balances = WalletService.getAllBalances(walletAddress);
+      balances = await WalletService.getAllBalances(walletAddress, exchange);
     }
 
     res.json(balances);
@@ -508,7 +598,7 @@ router.post("/wallet/sync", async (req, res) => {
 });
 
 /**
- * Ręcznie odświeża portfel z giełdy AsterDex SPOT
+ * Ręcznie odświeża portfel z wybranej giełdy
  */
 router.post("/wallet/refresh", async (req, res) => {
   try {
@@ -518,8 +608,13 @@ router.post("/wallet/refresh", async (req, res) => {
       return res.status(400).json({ error: "Missing X-Wallet-Address header" });
     }
 
-    // Pobierz rzeczywiste salda z AsterDex SPOT i zsynchronizuj
-    const account = await AsterSpotService.fetchSpotAccount(walletAddress);
+    // Pobierz wybraną giełdę dla tego portfela
+    const exchange = await getExchangeForWallet(walletAddress);
+    const exchangeService = exchange === "bingx" ? BingXService : AsterSpotService;
+    const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
+
+    // Pobierz rzeczywiste salda z wybranej giełdy i zsynchronizuj
+    const account = await exchangeService.fetchSpotAccount(walletAddress);
 
     if (Array.isArray(account?.balances)) {
       const externalBalances = {};
@@ -533,10 +628,12 @@ router.post("/wallet/refresh", async (req, res) => {
         }
       });
 
-      await WalletService.syncBalances(walletAddress, externalBalances);
+      // Przekaż exchange, żeby salda były zapisane per giełda
+      await WalletService.syncBalances(walletAddress, externalBalances, exchange);
+      console.log(`💰 Wallet refresh: synced from ${exchangeName} for wallet ${walletAddress}`);
       res.json({ success: true, balances: externalBalances });
     } else {
-      res.status(500).json({ error: "Failed to fetch balances from exchange" });
+      res.status(500).json({ error: `Failed to fetch balances from ${exchangeName}` });
     }
   } catch (error) {
     console.error("Error refreshing wallet:", error);

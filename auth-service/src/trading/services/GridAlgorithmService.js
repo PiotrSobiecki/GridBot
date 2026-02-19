@@ -293,13 +293,14 @@ async function checkAndUpdateFocusTime(state, currentPrice, settings) {
 /**
  * #2 Sprawdza czy można wykonać zakup (walidacja portfela)
  */
-function canExecuteBuy(transactionValue, state, settings) {
+async function canExecuteBuy(transactionValue, state, settings) {
   const buySettings = settings.buy;
   if (!buySettings) return true;
 
   // Na spocie jako stable używamy USDT
   const currency = buySettings.currency || "USDT";
-  const walletBalance = WalletService.getBalance(state.walletAddress, currency);
+  const exchange = settings.exchange || "asterdex";
+  const walletBalance = await WalletService.getBalance(state.walletAddress, currency, exchange);
   const walletProtection = new Decimal(buySettings.walletProtection || 0);
   const availableBalance = walletBalance.minus(walletProtection);
 
@@ -340,12 +341,13 @@ function canExecuteBuy(transactionValue, state, settings) {
 /**
  * #2 Sprawdza czy można wykonać sprzedaż (walidacja portfela)
  */
-function canExecuteSell(amount, state, settings) {
+async function canExecuteSell(amount, state, settings) {
   const sellSettings = settings.sell;
   if (!sellSettings) return true;
 
   const currency = sellSettings.currency || "BTC";
-  const walletBalance = WalletService.getBalance(state.walletAddress, currency);
+  const exchange = settings.exchange || "asterdex";
+  const walletBalance = await WalletService.getBalance(state.walletAddress, currency, exchange);
   const walletProtection = new Decimal(sellSettings.walletProtection || 0);
   const availableBalance = walletBalance.minus(walletProtection);
 
@@ -550,13 +552,15 @@ async function executeBuy(currentPrice, state, settings) {
   }
 
   // #2 Sprawdź portfel
-  if (!canExecuteBuy(transactionValue, state, settings)) {
+  if (!(await canExecuteBuy(transactionValue, state, settings))) {
     if (DEBUG_CONDITIONS) {
       const buySettings = settings.buy || {};
       const currency = buySettings.currency || "USDT";
-      const walletBalance = WalletService.getBalance(
+      const exchange = settings.exchange || "asterdex";
+      const walletBalance = await WalletService.getBalance(
         state.walletAddress,
         currency,
+        exchange,
       );
       const walletProtection = new Decimal(buySettings.walletProtection || 0);
       const availableBalance = walletBalance.minus(walletProtection);
@@ -1363,9 +1367,11 @@ async function executeSellShort(currentPrice, state, settings) {
   // bot sprzeda "ile ma", zamiast w ogóle nie wykonywać transakcji.
   const sellSettings = settings.sell || {};
   const sellCurrency = sellSettings.currency || "BTC";
-  const walletBalance = WalletService.getBalance(
+  const exchange = settings.exchange || "asterdex";
+  const walletBalance = await WalletService.getBalance(
     state.walletAddress,
     sellCurrency,
+    exchange,
   );
   const walletProtection = new Decimal(sellSettings.walletProtection || 0);
   let availableBalance = walletBalance.minus(walletProtection);
@@ -1385,7 +1391,7 @@ async function executeSellShort(currentPrice, state, settings) {
     amount = availableBalance.toDecimalPlaces(AMOUNT_SCALE, Decimal.ROUND_DOWN);
   }
 
-  if (!canExecuteSell(amount, state, settings)) {
+  if (!(await canExecuteSell(amount, state, settings))) {
     if (DEBUG_CONDITIONS) {
       console.log(
         `🔍 SELL skipped (canExecuteSell=false) wallet=${state.walletAddress} ` +

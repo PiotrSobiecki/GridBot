@@ -61,7 +61,9 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json());
+// Zwiększ limit rozmiaru requestu dla dużych payloadów (np. pozycje z calculationDetails)
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
 // Konfiguracja sesji - użyj PostgreSQL store na produkcji, MemoryStore lokalnie
@@ -122,11 +124,23 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Serve frontend static files (production: from /app/frontend/dist, local dev: from ../../frontend/dist)
-const frontendPathProd = path.join(__dirname, "../frontend/dist");
-const frontendPathDev = path.join(__dirname, "../../frontend/dist");
-const frontendPath = fs.existsSync(frontendPathProd) ? frontendPathProd : frontendPathDev;
-const frontendExists = fs.existsSync(frontendPath) && fs.existsSync(path.join(frontendPath, "index.html"));
+// Serve frontend static files – sprawdzamy kilka możliwych lokalizacji (dev z repo, docker, cwd)
+function findFrontendDist() {
+  const candidates = [
+    process.env.FRONTEND_DIST_PATH,
+    path.join(__dirname, "../frontend/dist"),   // auth-service/frontend/dist (np. Docker)
+    path.join(__dirname, "../../frontend/dist"), // GridBot/frontend/dist (dev z auth-service)
+    path.resolve(process.cwd(), "frontend/dist"),
+    path.resolve(process.cwd(), "../frontend/dist"),
+  ].filter(Boolean);
+  for (const dir of candidates) {
+    const indexFile = path.join(dir, "index.html");
+    if (fs.existsSync(dir) && fs.existsSync(indexFile)) return dir;
+  }
+  return null;
+}
+const frontendPath = findFrontendDist();
+const frontendExists = frontendPath !== null;
 
 if (frontendExists) {
   console.log("📦 Serving frontend from:", frontendPath);
@@ -146,7 +160,8 @@ if (frontendExists) {
     res.sendFile(path.join(frontendPath, "index.html"));
   });
 } else {
-  console.log("ℹ️ Frontend not found - serving API only (frontend should be deployed separately)");
+  console.log("ℹ️ Frontend not found - serving API only.");
+  console.log("   Aby serwować frontend z backendem: w katalogu frontend uruchom: npm run build");
   
   // API-only fallback - return 404 for non-API routes
   app.get("*", (req, res, next) => {

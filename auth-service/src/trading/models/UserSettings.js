@@ -23,6 +23,13 @@ import { v4 as uuidv4 } from "uuid";
   } catch (e) {
     // Ignoruj jeśli kolumna już istnieje
   }
+  
+  // Best-effort migration: dodaj kolumnę exchange jeśli jej brakuje
+  try {
+    await db.exec("ALTER TABLE user_settings ADD COLUMN exchange TEXT DEFAULT 'asterdex';");
+  } catch (e) {
+    // Ignoruj jeśli kolumna już istnieje
+  }
 })();
 
 /**
@@ -38,6 +45,8 @@ export class UserSettings {
     this.orders = this._parseJson(data.orders || "[]");
     // Konfiguracja API per użytkownik (zaszyfrowane klucze, nazwa konta, avatar)
     this.apiConfig = this._parseJson(data.apiConfig || data.api_config || "{}");
+    // Wybrana giełda: "asterdex" lub "bingx"
+    this.exchange = data.exchange || "asterdex";
     this.createdAt = data.createdAt || data.created_at;
     this.updatedAt = data.updatedAt || data.updated_at;
 
@@ -55,6 +64,8 @@ export class UserSettings {
           baseAsset: "BTC",
           // Na spocie jako stable używamy USDT
           quoteAsset: "USDT",
+          // Giełda dla tego zlecenia (domyślnie taka sama jak wybrana giełda użytkownika)
+          exchange: this.exchange || "asterdex",
           buy: {
             currency: "USDT",
             walletProtection: 100,
@@ -143,8 +154,8 @@ export class UserSettings {
     if (!this.createdAt) this.createdAt = now;
 
     const stmt = db.prepare(`
-      INSERT OR REPLACE INTO user_settings (id, wallet_address, wallet_currencies, orders, api_config, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO user_settings (id, wallet_address, wallet_currencies, orders, api_config, exchange, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     await stmt.run(
@@ -153,6 +164,7 @@ export class UserSettings {
       JSON.stringify(this.wallet),
       JSON.stringify(this.orders),
       JSON.stringify(this.apiConfig || {}),
+      this.exchange || "asterdex",
       this.createdAt,
       this.updatedAt,
     );

@@ -6,8 +6,9 @@ import Decimal from 'decimal.js';
  * W produkcji połączyć z prawdziwym API giełdy (np. Aster DEX)
  */
 
-// Symulowane salda portfeli: walletAddress -> currency -> balance
-const walletBalances = new Map();
+// Symulowane salda portfeli: walletAddress -> exchange -> currency -> balance
+// Przechowujemy salda osobno dla każdej giełdy
+const walletBalances = new Map(); // walletAddress -> exchange -> currency -> balance
 
 // Domyślne salda dla nowych portfeli
 const DEFAULT_BALANCES = {
@@ -20,45 +21,170 @@ const DEFAULT_BALANCES = {
 };
 
 /**
- * Pobiera saldo dla danej waluty
+ * Pobiera wybraną giełdę dla portfela (domyślnie "asterdex")
  */
-export function getBalance(walletAddress, currency) {
+async function getExchange(walletAddress) {
+  if (!walletAddress) {
+    return "asterdex";
+  }
+  
+  try {
+    const { default: UserSettings } = await import("../models/UserSettings.js");
+    const settings = await UserSettings.findOne({
+      walletAddress: walletAddress.toLowerCase(),
+    });
+    
+    const exchange = settings?.exchange || "asterdex";
+    return exchange === "bingx" ? "bingx" : "asterdex";
+  } catch (e) {
+    console.warn(`⚠️ Failed to get exchange for wallet=${walletAddress}:`, e.message);
+    return "asterdex";
+  }
+}
+
+/**
+ * Pobiera saldo dla danej waluty z wybranej giełdy
+ */
+export async function getBalance(walletAddress, currency, exchange = null) {
   const wallet = walletAddress.toLowerCase();
   const curr = currency.toUpperCase();
   
-  if (!walletBalances.has(wallet)) {
-    walletBalances.set(wallet, new Map(Object.entries(DEFAULT_BALANCES)));
+  // Jeśli exchange nie podano, pobierz z ustawień użytkownika
+  if (!exchange) {
+    exchange = await getExchange(walletAddress);
   }
   
-  const balances = walletBalances.get(wallet);
+  if (!walletBalances.has(wallet)) {
+    walletBalances.set(wallet, new Map());
+  }
+  
+  const exchanges = walletBalances.get(wallet);
+  if (!exchanges.has(exchange)) {
+    exchanges.set(exchange, new Map(Object.entries(DEFAULT_BALANCES)));
+  }
+  
+  const balances = exchanges.get(exchange);
   return new Decimal(balances.get(curr) || '0');
 }
 
 /**
- * Ustawia saldo dla danej waluty
+ * Synchronous version dla kompatybilności wstecznej (używa domyślnej giełdy)
  */
-export function setBalance(walletAddress, currency, balance) {
+export function getBalanceSync(walletAddress, currency) {
+  const wallet = walletAddress.toLowerCase();
+  const curr = currency.toUpperCase();
+  
+  // Użyj pierwszej dostępnej giełdy lub domyślnych sald
+  if (!walletBalances.has(wallet)) {
+    return new Decimal(DEFAULT_BALANCES[curr] || '0');
+  }
+  
+  const exchanges = walletBalances.get(wallet);
+  // Sprawdź czy istnieje asterdex (domyślna)
+  if (exchanges.has("asterdex")) {
+    const balances = exchanges.get("asterdex");
+    return new Decimal(balances.get(curr) || '0');
+  }
+  
+  // Jeśli nie ma asterdex, użyj pierwszej dostępnej giełdy
+  const firstExchange = exchanges.keys().next().value;
+  if (firstExchange) {
+    const balances = exchanges.get(firstExchange);
+    return new Decimal(balances.get(curr) || '0');
+  }
+  
+  return new Decimal(DEFAULT_BALANCES[curr] || '0');
+}
+
+/**
+ * Ustawia saldo dla danej waluty na wybranej giełdzie (async)
+ */
+export async function setBalance(walletAddress, currency, balance, exchange = null) {
+  const wallet = walletAddress.toLowerCase();
+  const curr = currency.toUpperCase();
+  
+  // Jeśli exchange nie podano, pobierz z ustawień użytkownika
+  if (!exchange) {
+    exchange = await getExchange(walletAddress);
+  }
+  
+  if (!walletBalances.has(wallet)) {
+    walletBalances.set(wallet, new Map());
+  }
+  
+  const exchanges = walletBalances.get(wallet);
+  if (!exchanges.has(exchange)) {
+    exchanges.set(exchange, new Map(Object.entries(DEFAULT_BALANCES)));
+  }
+  
+  exchanges.get(exchange).set(curr, balance.toString());
+}
+
+/**
+ * Synchronous version dla kompatybilności wstecznej (używa asterdex)
+ */
+export function setBalanceSync(walletAddress, currency, balance) {
   const wallet = walletAddress.toLowerCase();
   const curr = currency.toUpperCase();
   
   if (!walletBalances.has(wallet)) {
-    walletBalances.set(wallet, new Map(Object.entries(DEFAULT_BALANCES)));
+    walletBalances.set(wallet, new Map());
   }
   
-  walletBalances.get(wallet).set(curr, balance.toString());
+  const exchanges = walletBalances.get(wallet);
+  // Użyj asterdex jako domyślnej
+  if (!exchanges.has("asterdex")) {
+    exchanges.set("asterdex", new Map(Object.entries(DEFAULT_BALANCES)));
+  }
+  
+  exchanges.get("asterdex").set(curr, balance.toString());
 }
 
 /**
- * Pobiera wszystkie salda dla portfela
+ * Pobiera wszystkie salda dla portfela z wybranej giełdy
  */
-export function getAllBalances(walletAddress) {
+export async function getAllBalances(walletAddress, exchange = null) {
+  const wallet = walletAddress.toLowerCase();
+  
+  // Jeśli exchange nie podano, pobierz z ustawień użytkownika
+  if (!exchange) {
+    exchange = await getExchange(walletAddress);
+  }
+  
+  if (!walletBalances.has(wallet)) {
+    walletBalances.set(wallet, new Map());
+  }
+  
+  const exchanges = walletBalances.get(wallet);
+  if (!exchanges.has(exchange)) {
+    exchanges.set(exchange, new Map(Object.entries(DEFAULT_BALANCES)));
+  }
+  
+  const balances = exchanges.get(exchange);
+  const result = {};
+  balances.forEach((value, key) => {
+    result[key] = value;
+  });
+  return result;
+}
+
+/**
+ * Synchronous version dla kompatybilności wstecznej (używa asterdex)
+ */
+export function getAllBalancesSync(walletAddress) {
   const wallet = walletAddress.toLowerCase();
   
   if (!walletBalances.has(wallet)) {
-    walletBalances.set(wallet, new Map(Object.entries(DEFAULT_BALANCES)));
+    walletBalances.set(wallet, new Map());
   }
   
-  const balances = walletBalances.get(wallet);
+  const exchanges = walletBalances.get(wallet);
+  // Użyj asterdex jako domyślnej
+  if (!exchanges.has("asterdex")) {
+    exchanges.set("asterdex", new Map(Object.entries(DEFAULT_BALANCES)));
+  }
+  
+  const balances = exchanges.get("asterdex");
   const result = {};
   balances.forEach((value, key) => {
     result[key] = value;
@@ -74,14 +200,15 @@ export function getAllBalances(walletAddress) {
  * @param {string} baseCurrency - waluta kupowana (np. BTC)
  * @param {Decimal} quoteAmount - ilość wydawana (np. 1000 USDC)
  * @param {Decimal} baseAmount - ilość otrzymywana (np. 0.01 BTC)
- * @returns {boolean} true jeśli transakcja udana
+ * @param {string} exchange - giełda (opcjonalnie)
+ * @returns {Promise<boolean>} true jeśli transakcja udana
  */
-export function executeBuy(walletAddress, quoteCurrency, baseCurrency, quoteAmount, baseAmount) {
+export async function executeBuy(walletAddress, quoteCurrency, baseCurrency, quoteAmount, baseAmount, exchange = null) {
   const wallet = walletAddress.toLowerCase();
   const quote = quoteCurrency.toUpperCase();
   const base = baseCurrency.toUpperCase();
   
-  const currentQuote = getBalance(wallet, quote);
+  const currentQuote = await getBalance(walletAddress, quote, exchange);
   const quoteAmountDec = new Decimal(quoteAmount);
   
   // Sprawdź czy wystarczy środków
@@ -92,12 +219,12 @@ export function executeBuy(walletAddress, quoteCurrency, baseCurrency, quoteAmou
   
   // Wykonaj transakcję
   const newQuoteBalance = currentQuote.minus(quoteAmountDec);
-  const currentBase = getBalance(wallet, base);
+  const currentBase = await getBalance(walletAddress, base, exchange);
   const baseAmountDec = new Decimal(baseAmount);
   const newBaseBalance = currentBase.plus(baseAmountDec);
   
-  setBalance(wallet, quote, newQuoteBalance);
-  setBalance(wallet, base, newBaseBalance);
+  await setBalance(walletAddress, quote, newQuoteBalance, exchange);
+  await setBalance(walletAddress, base, newBaseBalance, exchange);
   
   console.log(`✅ BUY executed: -${quoteAmountDec} ${quote} -> +${baseAmountDec} ${base}`);
   
@@ -112,14 +239,15 @@ export function executeBuy(walletAddress, quoteCurrency, baseCurrency, quoteAmou
  * @param {string} quoteCurrency - waluta otrzymywana (np. USDC)
  * @param {Decimal} baseAmount - ilość sprzedawana (np. 0.01 BTC)
  * @param {Decimal} quoteAmount - ilość otrzymywana (np. 1000 USDC)
- * @returns {boolean} true jeśli transakcja udana
+ * @param {string} exchange - giełda (opcjonalnie)
+ * @returns {Promise<boolean>} true jeśli transakcja udana
  */
-export function executeSell(walletAddress, baseCurrency, quoteCurrency, baseAmount, quoteAmount) {
+export async function executeSell(walletAddress, baseCurrency, quoteCurrency, baseAmount, quoteAmount, exchange = null) {
   const wallet = walletAddress.toLowerCase();
   const base = baseCurrency.toUpperCase();
   const quote = quoteCurrency.toUpperCase();
   
-  const currentBase = getBalance(wallet, base);
+  const currentBase = await getBalance(walletAddress, base, exchange);
   const baseAmountDec = new Decimal(baseAmount);
   
   // Sprawdź czy wystarczy środków
@@ -130,12 +258,12 @@ export function executeSell(walletAddress, baseCurrency, quoteCurrency, baseAmou
   
   // Wykonaj transakcję
   const newBaseBalance = currentBase.minus(baseAmountDec);
-  const currentQuote = getBalance(wallet, quote);
+  const currentQuote = await getBalance(walletAddress, quote, exchange);
   const quoteAmountDec = new Decimal(quoteAmount);
   const newQuoteBalance = currentQuote.plus(quoteAmountDec);
   
-  setBalance(wallet, base, newBaseBalance);
-  setBalance(wallet, quote, newQuoteBalance);
+  await setBalance(walletAddress, base, newBaseBalance, exchange);
+  await setBalance(walletAddress, quote, newQuoteBalance, exchange);
   
   console.log(`✅ SELL executed: -${baseAmountDec} ${base} -> +${quoteAmountDec} ${quote}`);
   
@@ -143,28 +271,49 @@ export function executeSell(walletAddress, baseCurrency, quoteCurrency, baseAmou
 }
 
 /**
- * Rezerwuje środki dla transakcji
+ * Rezerwuje środki dla transakcji (async)
  */
-export function reserveFunds(walletAddress, currency, amount) {
-  const balance = getBalance(walletAddress, currency);
+export async function reserveFunds(walletAddress, currency, amount, exchange = null) {
+  const balance = await getBalance(walletAddress, currency, exchange);
+  return balance.gte(new Decimal(amount));
+}
+
+/**
+ * Synchronous version dla kompatybilności wstecznej
+ */
+export function reserveFundsSync(walletAddress, currency, amount) {
+  const balance = getBalanceSync(walletAddress, currency);
   return balance.gte(new Decimal(amount));
 }
 
 /**
  * Synchronizuje salda z zewnętrznego źródła (np. API giełdy) i zapisuje do bazy
+ * Salda są przechowywane per giełda
  */
-export async function syncBalances(walletAddress, externalBalances) {
+export async function syncBalances(walletAddress, externalBalances, exchange = null) {
   const wallet = walletAddress.toLowerCase();
+  
+  // Jeśli exchange nie podano, pobierz z ustawień użytkownika
+  if (!exchange) {
+    exchange = await getExchange(walletAddress);
+  }
+  
+  if (!walletBalances.has(wallet)) {
+    walletBalances.set(wallet, new Map());
+  }
+  
+  const exchanges = walletBalances.get(wallet);
   const balances = new Map();
   
   Object.entries(externalBalances).forEach(([currency, balance]) => {
     balances.set(currency.toUpperCase(), balance.toString());
   });
   
-  walletBalances.set(wallet, balances);
-  console.log(`✅ Synced balances for ${walletAddress}:`, externalBalances);
+  exchanges.set(exchange, balances);
+  console.log(`✅ Synced balances for ${walletAddress} from ${exchange}:`, externalBalances);
 
   // Zapisz do bazy danych (UserSettings) - dynamiczny import żeby uniknąć circular dependency
+  // Uwaga: w bazie przechowujemy tylko salda z aktualnie wybranej giełdy
   try {
     const { default: UserSettings } = await import("../models/UserSettings.js");
     let settings = await UserSettings.findOne({ walletAddress: wallet });
@@ -182,7 +331,7 @@ export async function syncBalances(walletAddress, externalBalances) {
 
     settings.wallet = walletArray;
     await settings.save();
-    console.log(`💾 Saved wallet to database for ${walletAddress}`);
+    console.log(`💾 Saved wallet to database for ${walletAddress} (${exchange})`);
   } catch (error) {
     console.error(`❌ Failed to save wallet to database:`, error.message);
   }

@@ -1,10 +1,12 @@
 import WebSocket from "ws";
 import Decimal from "decimal.js";
 import * as AsterSpotService from "./AsterSpotService.js";
+import * as BingXService from "./BingXService.js";
+import UserSettings from "../models/UserSettings.js";
 
 /**
  * Serwis do pobierania cen w czasie rzeczywistym
- * Działa wyłącznie na AsterDex spot API
+ * Działa na wybranej giełdzie (AsterDex lub BingX)
  */
 
 // Tryb symulacji: włączony tylko gdy SIMULATION_MODE === "true"
@@ -12,9 +14,14 @@ import * as AsterSpotService from "./AsterSpotService.js";
 const SIMULATION_MODE = process.env.SIMULATION_MODE === "false";
 const USE_ASTER_SPOT = process.env.USE_ASTER_SPOT === "true";
 
-// Aktualne ceny: symbol -> price
+// Aktualne ceny per giełda: exchange -> Map<symbol, price>
+const currentPricesByExchange = new Map(); // exchange -> Map<symbol, price>
+// Zmiana ceny z 24h per giełda: exchange -> Map<symbol, priceChangePercent>
+const priceChangesByExchange = new Map(); // exchange -> Map<symbol, number>
+const lastUpdateTimeByExchange = new Map(); // exchange -> Map<symbol, timestamp>
+
+// Dla kompatybilności wstecznej - globalne mapy (używają najnowszych cen)
 const currentPrices = new Map();
-// Zmiana ceny z 24h: symbol -> priceChangePercent (liczba)
 const priceChanges = new Map();
 const lastUpdateTime = new Map();
 
@@ -46,10 +53,11 @@ export function init(wss) {
     startSimulation();
   } else {
     console.log(
-      "📡 Price feed from Aster – odświeżanie przy cyku schedulera (refreshInterval z zleceń)",
+      "📡 Price feed – odświeżanie przy cyku schedulera (refreshInterval z zleceń)",
     );
     AsterSpotService.init();
-    refreshFromAster();
+    BingXService.init();
+    // Nie pobieramy cen tutaj - scheduler będzie je pobierał dla każdego portfela z jego giełdy
   }
 
   // Obsługa WebSocket klientów
@@ -97,24 +105,76 @@ function startSimulation() {
 }
 
 /**
- * Odświeża ceny z Aster (eksportowane – wywoływane z GridSchedulerService przy każdym cyku).
+ * Pobiera wybraną giełdę dla użytkownika (domyślnie "asterdex")
+ * @param {string} walletAddress - adres portfela
+ * @returns {Promise<"asterdex"|"bingx">}
  */
-export async function refreshFromAster() {
-  return _refreshFromAster();
+async function getExchange(walletAddress) {
+  if (!walletAddress) {
+    return "asterdex"; // Domyślnie AsterDex
+  }
+  
+  try {
+    const settings = await UserSettings.findOne({
+      walletAddress: walletAddress.toLowerCase(),
+    });
+    
+    const exchange = settings?.exchange || "asterdex";
+    return exchange === "bingx" ? "bingx" : "asterdex";
+  } catch (e) {
+    console.warn(`⚠️ Failed to get exchange for wallet=${walletAddress}:`, e.message);
+    return "asterdex";
+  }
 }
 
-async function _refreshFromAster() {
+/**
+ * Odświeża ceny z wybranej giełdy (eksportowane – wywoływane z GridSchedulerService przy każdym cyku).
+ * @param {string} walletAddress - adres portfela (do określenia giełdy)
+ * @param {string} exchange - opcjonalna giełda ("asterdex" lub "bingx"), ma priorytet nad UserSettings.exchange
+ */
+export async function refreshFromAster(walletAddress = null, exchange = null) {
+  return _refreshFromExchange(walletAddress, exchange);
+}
+
+async function _refreshFromExchange(walletAddress = null, forcedExchange = null) {
   try {
-    const tickers = await AsterSpotService.fetchAllTickerPrices();
+    if (!walletAddress) {
+      console.warn(`⚠️ refreshFromExchange called without walletAddress - skipping`);
+      return;
+    }
+    
+    // Jeśli podano forcedExchange, użyj go (z zlecenia), w przeciwnym razie pobierz z UserSettings
+    let exchange = forcedExchange;
+    if (!exchange) {
+      exchange = await getExchange(walletAddress);
+    }
+    
+    const exchangeService = exchange === "bingx" ? BingXService : AsterSpotService;
+    const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
+    
+    console.log(`📡 Fetching prices from ${exchangeName} API (wallet: ${walletAddress}, exchange: ${exchange}${forcedExchange ? " [from order]" : " [from UserSettings]"})`);
+    
+    const tickers = await exchangeService.fetchAllTickerPrices(walletAddress);
     const now = Date.now();
 
     if (!Array.isArray(tickers)) {
       console.error(
-        "❌ Aster API zwróciło nie-tablicę:",
+        `❌ ${exchangeName} API zwróciło nie-tablicę:`,
         typeof tickers,
       );
       return;
     }
+
+    // Inicjalizuj mapy dla tej giełdy jeśli nie istnieją
+    if (!currentPricesByExchange.has(exchange)) {
+      currentPricesByExchange.set(exchange, new Map());
+      priceChangesByExchange.set(exchange, new Map());
+      lastUpdateTimeByExchange.set(exchange, new Map());
+    }
+
+    const exchangePrices = currentPricesByExchange.get(exchange);
+    const exchangeChanges = priceChangesByExchange.get(exchange);
+    const exchangeUpdateTimes = lastUpdateTimeByExchange.get(exchange);
 
     let loadedCount = 0;
     tickers.forEach((t) => {
@@ -123,6 +183,17 @@ async function _refreshFromAster() {
       try {
         const priceDec = new Decimal(t.price);
         if (priceDec.gt(0)) {
+          // Zapisz per giełda
+          exchangePrices.set(symbol, priceDec);
+          if (
+            t.priceChangePercent != null &&
+            !isNaN(parseFloat(t.priceChangePercent))
+          ) {
+            exchangeChanges.set(symbol, parseFloat(t.priceChangePercent));
+          }
+          exchangeUpdateTimes.set(symbol, now);
+          
+          // Dla kompatybilności wstecznej - aktualizuj też globalne mapy
           currentPrices.set(symbol, priceDec);
           if (
             t.priceChangePercent != null &&
@@ -131,6 +202,7 @@ async function _refreshFromAster() {
             priceChanges.set(symbol, parseFloat(t.priceChangePercent));
           }
           lastUpdateTime.set(symbol, now);
+          
           broadcastPrice(symbol, priceDec);
           loadedCount++;
         }
@@ -139,16 +211,21 @@ async function _refreshFromAster() {
       }
     });
 
-    if (loadedCount > 0 && process.env.GRID_DEBUG_CONDITIONS) {
-      const sampleSymbols = Array.from(currentPrices.keys())
-        .slice(0, 3)
-        .map((s) => `${s}=${currentPrices.get(s).toString()}`)
-        .join(", ");
-      console.log(`📋 Ceny: ${sampleSymbols}`);
+    if (loadedCount > 0) {
+      console.log(`✅ Loaded ${loadedCount} prices from ${exchangeName} API`);
+      if (process.env.GRID_DEBUG_CONDITIONS) {
+        const sampleSymbols = Array.from(exchangePrices.keys())
+          .slice(0, 3)
+          .map((s) => `${s}=${exchangePrices.get(s).toString()}`)
+          .join(", ");
+        console.log(`📋 ${exchangeName} prices: ${sampleSymbols}`);
+      }
     }
   } catch (error) {
+    const exchange = await getExchange(walletAddress);
+    const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
     console.error(
-      "❌ Failed to refresh prices from Aster:",
+      `❌ Failed to refresh prices from ${exchangeName}:`,
       error.message,
     );
   }
@@ -185,11 +262,50 @@ function broadcastPrice(symbol, price) {
 }
 
 /**
- * Pobiera aktualną cenę dla symbolu
+ * Pobiera aktualną cenę dla symbolu (z wybranej giełdy lub globalnie)
+ * @param {string} symbol - symbol pary (np. "BTCUSDT")
+ * @param {string} walletAddress - adres portfela (opcjonalnie, do określenia giełdy)
+ * @returns {Promise<Decimal>} - cena jako Decimal
  */
-export function getPrice(symbol) {
+export async function getPrice(symbol, walletAddress = null) {
+  if (walletAddress) {
+    try {
+      const exchange = await getExchange(walletAddress);
+      const exchangePrices = currentPricesByExchange.get(exchange);
+      if (exchangePrices) {
+        const price = exchangePrices.get(symbol.toUpperCase());
+        if (price) return price;
+      }
+    } catch (e) {
+      // Fallback do globalnych cen
+    }
+  }
+  
+  // Fallback: użyj globalnych cen (kompatybilność wsteczna)
   const price = currentPrices.get(symbol.toUpperCase());
   return price || new Decimal(0);
+}
+
+/**
+ * Synchronous version dla kompatybilności wstecznej
+ * Używa globalnych cen (najnowsze z dowolnej giełdy)
+ */
+export function getPriceSync(symbol) {
+  const price = currentPrices.get(symbol.toUpperCase());
+  return price || new Decimal(0);
+}
+
+/**
+ * Pobiera cenę dla symbolu z konkretnej giełdy (synchronous)
+ */
+export function getPriceForExchange(symbol, exchange = "asterdex") {
+  const exchangePrices = currentPricesByExchange.get(exchange);
+  if (exchangePrices) {
+    const price = exchangePrices.get(symbol.toUpperCase());
+    if (price) return price;
+  }
+  // Fallback do globalnych cen
+  return getPriceSync(symbol);
 }
 
 /**

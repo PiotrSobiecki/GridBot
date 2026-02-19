@@ -624,7 +624,7 @@ export default function OrderSettings({
               </div>
             </div>
             <InputField
-              label="Zabezpieczenie portfela"
+              label={`Zabezpieczenie portfela (${localOrder.quoteAsset || localOrder.buy.currency || "USDT"})`}
               value={localOrder.buy.walletProtection}
               onChange={(v) => updateField("buy.walletProtection", Number(v))}
               type="number"
@@ -640,10 +640,11 @@ export default function OrderSettings({
               onChange={(v) => updateField("buy.mode", v)}
             />
             <InputField
-              label="Max wartość"
+              label="Max wartość (USDT)"
               value={localOrder.buy.maxValue}
               onChange={(v) => updateField("buy.maxValue", Number(v))}
               type="number"
+              step="0.01"
               disabled={localOrder.buy.mode !== "maxDefined"}
             />
             <CheckboxField
@@ -675,7 +676,7 @@ export default function OrderSettings({
               </div>
             </div>
             <InputField
-              label="Zabezpieczenie portfela"
+              label={`Zabezpieczenie portfela (${localOrder.baseAsset || localOrder.sell.currency || "BTC"})`}
               value={localOrder.sell.walletProtection}
               onChange={(v) => updateField("sell.walletProtection", Number(v))}
               type="number"
@@ -692,11 +693,11 @@ export default function OrderSettings({
               onChange={(v) => updateField("sell.mode", v)}
             />
             <InputField
-              label="Max wartość"
+              label="Max wartość (USDT)"
               value={localOrder.sell.maxValue}
               onChange={(v) => updateField("sell.maxValue", Number(v))}
               type="number"
-              step="0.00000001"
+              step="0.01"
               disabled={localOrder.sell.mode !== "maxDefined"}
             />
             <CheckboxField
@@ -1069,7 +1070,7 @@ export default function OrderSettings({
               <RangeThresholdEditor
                 thresholds={localOrder.additionalBuyValues}
                 onChange={(v) => updateField("additionalBuyValues", v)}
-                valueLabel="Dodatkowa wartość"
+                valueLabel="Dodatkowa wartość (USDT)"
               />
             </div>
             <div>
@@ -1079,7 +1080,7 @@ export default function OrderSettings({
               <RangeThresholdEditor
                 thresholds={localOrder.additionalSellValues}
                 onChange={(v) => updateField("additionalSellValues", v)}
-                valueLabel="Dodatkowa wartość"
+                valueLabel="Dodatkowa wartość (USDT)"
               />
             </div>
           </div>
@@ -1092,6 +1093,7 @@ export default function OrderSettings({
               <RangeThresholdEditor
                 thresholds={localOrder.maxBuyPerTransaction}
                 onChange={(v) => updateField("maxBuyPerTransaction", v)}
+                valueLabel="MAX wartość (USDT)"
               />
             </div>
             <div>
@@ -1101,6 +1103,7 @@ export default function OrderSettings({
               <RangeThresholdEditor
                 thresholds={localOrder.maxSellPerTransaction}
                 onChange={(v) => updateField("maxSellPerTransaction", v)}
+                valueLabel="MAX wartość (USDT)"
               />
             </div>
           </div>

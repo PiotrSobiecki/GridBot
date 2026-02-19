@@ -4,7 +4,7 @@ import { useStore } from "../store/useStore";
 import { api } from "../api";
 
 export default function PriceDisplay() {
-  const { prices, userSettings, activeOrderIndex, updatePrice } = useStore();
+  const { prices, userSettings, activeOrderIndex, updatePrice, walletAddress } = useStore();
 
   const orders = userSettings?.orders || [];
   const activeOrder = orders[activeOrderIndex] ?? orders[0];
@@ -61,7 +61,7 @@ export default function PriceDisplay() {
     const intervalId = setInterval(loadPrices, refreshIntervalMs);
 
     return () => clearInterval(intervalId);
-  }, [updatePrice, refreshIntervalMs]);
+  }, [updatePrice, refreshIntervalMs, walletAddress]);
 
   const formatPrice = (symbol: string, price: number | string) => {
     const numPrice = typeof price === "string" ? parseFloat(price) : price;

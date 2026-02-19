@@ -46,10 +46,40 @@ router.get("/", authMiddleware, async (req, res) => {
       await settings.save();
     }
 
+    const currentExchange = settings.exchange || "asterdex";
+    
+    // Migracja: przypisz aktualną giełdę do zleceń bez pola exchange
+    let needsSave = false;
+    const migratedOrders = (settings.orders || []).map(order => {
+      if (!order.exchange) {
+        order.exchange = currentExchange;
+        needsSave = true;
+      }
+      return order;
+    });
+    
+    if (needsSave) {
+      settings.orders = migratedOrders;
+      await settings.save();
+      console.log(`🔄 Migrated orders: assigned exchange=${currentExchange} to orders without exchange field`);
+    }
+    
+    // Filtruj zlecenia - pokazuj tylko te dla aktualnie wybranej giełdy
+    const filteredOrders = migratedOrders.filter(order => {
+      const orderExchange = order.exchange || "asterdex";
+      return orderExchange === currentExchange;
+    });
+    
+    console.log(
+      `📊 Settings filter: wallet=${req.walletAddress}, exchange=${currentExchange}, ` +
+      `total=${migratedOrders.length}, filtered=${filteredOrders.length}`
+    );
+
     res.json({
       walletAddress: settings.walletAddress,
       wallet: settings.wallet,
-      orders: normalizeOrders(settings.orders),
+      orders: normalizeOrders(filteredOrders),
+      exchange: currentExchange,
     });
   } catch (error) {
     console.error("Get settings error:", error);
@@ -68,12 +98,18 @@ router.get("/api", authMiddleware, async (req, res) => {
     const settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
     const apiConfig = settings?.apiConfig || {};
     const aster = apiConfig.aster || {};
+    const bingx = apiConfig.bingx || {};
 
     res.json({
       aster: {
         name: aster.name || "",
         avatar: aster.avatar || "",
         hasKeys: !!(aster.apiKeyEncrypted && aster.apiSecretEncrypted),
+      },
+      bingx: {
+        name: bingx.name || "",
+        avatar: bingx.avatar || "",
+        hasKeys: !!(bingx.apiKeyEncrypted && bingx.apiSecretEncrypted),
       },
     });
   } catch (error) {
@@ -126,6 +162,87 @@ router.post("/api/aster", authMiddleware, async (req, res) => {
   }
 });
 
+/**
+ * POST /settings/api/bingx
+ * Zapisuje zaszyfrowane klucze API + metadane konta BingX dla zalogowanego portfela.
+ */
+router.post("/api/bingx", authMiddleware, async (req, res) => {
+  try {
+    const { name, avatar, apiKey, apiSecret } = req.body || {};
+
+    let settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
+
+    if (!settings) {
+      settings = new UserSettings({ walletAddress: req.walletAddress });
+    }
+
+    const cfg = settings.apiConfig || {};
+    const bingx = cfg.bingx || {};
+
+    if (typeof name === "string") bingx.name = name;
+    if (typeof avatar === "string") bingx.avatar = avatar;
+
+    if (typeof apiKey === "string" && apiKey.trim()) {
+      bingx.apiKeyEncrypted = encrypt(apiKey.trim());
+    }
+    if (typeof apiSecret === "string" && apiSecret.trim()) {
+      bingx.apiSecretEncrypted = encrypt(apiSecret.trim());
+    }
+
+    cfg.bingx = bingx;
+    settings.apiConfig = cfg;
+    await settings.save();
+
+    res.json({
+      bingx: {
+        name: bingx.name || "",
+        avatar: bingx.avatar || "",
+        hasKeys: !!(bingx.apiKeyEncrypted && bingx.apiSecretEncrypted),
+      },
+    });
+  } catch (error) {
+    console.error("Save BingX API settings error:", error);
+    res.status(500).json({ error: "Failed to save BingX API settings" });
+  }
+});
+
+/**
+ * PUT /settings/exchange
+ * Ustawia wybraną giełdę (asterdex lub bingx)
+ */
+router.put("/exchange", authMiddleware, async (req, res) => {
+  try {
+    const { exchange } = req.body;
+    
+    if (exchange !== "asterdex" && exchange !== "bingx") {
+      return res.status(400).json({ error: "Invalid exchange. Must be 'asterdex' or 'bingx'" });
+    }
+
+    let settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
+
+    if (!settings) {
+      settings = new UserSettings({ walletAddress: req.walletAddress });
+    }
+
+    settings.exchange = exchange;
+    await settings.save();
+
+    // Wyczyść cache exchangeInfo, żeby przy następnym użyciu pobrać dane z nowej giełdy
+    try {
+      const { clearExchangeInfoCache } = await import("../trading/services/ExchangeService.js");
+      clearExchangeInfoCache();
+      console.log(`🔄 Exchange changed to ${exchange} for wallet ${req.walletAddress} - cache cleared`);
+    } catch (e) {
+      console.warn('⚠️ Failed to clear exchange cache:', e.message);
+    }
+
+    res.json({ exchange: settings.exchange });
+  } catch (error) {
+    console.error("Update exchange error:", error);
+    res.status(500).json({ error: "Failed to update exchange" });
+  }
+});
+
 // Aktualizuj portfel
 router.put("/wallet", authMiddleware, async (req, res) => {
   try {
@@ -147,11 +264,40 @@ router.put("/wallet", authMiddleware, async (req, res) => {
   }
 });
 
-// Pobierz wszystkie zlecenia
+// Pobierz wszystkie zlecenia (tylko dla aktualnie wybranej giełdy)
 router.get("/orders", authMiddleware, async (req, res) => {
   try {
     const settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
-    res.json(normalizeOrders(settings?.orders || []));
+    const currentExchange = settings?.exchange || "asterdex";
+    
+    // Migracja: przypisz aktualną giełdę do zleceń bez pola exchange
+    let needsSave = false;
+    const migratedOrders = (settings?.orders || []).map(order => {
+      if (!order.exchange) {
+        order.exchange = currentExchange;
+        needsSave = true;
+      }
+      return order;
+    });
+    
+    if (needsSave && settings) {
+      settings.orders = migratedOrders;
+      await settings.save();
+      console.log(`🔄 Migrated orders: assigned exchange=${currentExchange} to orders without exchange field`);
+    }
+    
+    // Filtruj zlecenia - pokazuj tylko te dla aktualnie wybranej giełdy
+    const filteredOrders = migratedOrders.filter(order => {
+      const orderExchange = order.exchange || "asterdex";
+      return orderExchange === currentExchange;
+    });
+    
+    console.log(
+      `📊 Orders filter: wallet=${req.walletAddress}, exchange=${currentExchange}, ` +
+      `total=${migratedOrders.length}, filtered=${filteredOrders.length}`
+    );
+    
+    res.json(normalizeOrders(filteredOrders));
   } catch (error) {
     console.error("Get orders error:", error);
     res.status(500).json({ error: "Failed to get orders" });
@@ -175,6 +321,11 @@ router.post("/orders", authMiddleware, async (req, res) => {
     }
     orderData._id = orderData._id || orderData.id;
     orderData.id = orderData.id || orderData._id;
+    
+    // Przypisz aktualną giełdę do zlecenia (jeśli nie została podana)
+    if (!orderData.exchange) {
+      orderData.exchange = settings.exchange || "asterdex";
+    }
 
     settings.orders.push(orderData);
     await settings.save();

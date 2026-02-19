@@ -107,9 +107,10 @@ class ApiClient {
     });
   }
 
-  // API Settings (Aster keys, account meta)
+  // API Settings (Aster/BingX keys, account meta)
   async getApiSettings(): Promise<{
     aster?: { name?: string; avatar?: string; hasKeys?: boolean };
+    bingx?: { name?: string; avatar?: string; hasKeys?: boolean };
   }> {
     return this.request(AUTH_API, "/settings/api");
   }
@@ -125,6 +126,27 @@ class ApiClient {
     return this.request(AUTH_API, "/settings/api/aster", {
       method: "POST",
       body: JSON.stringify(payload),
+    });
+  }
+
+  async saveBingXApiSettings(payload: {
+    name?: string;
+    avatar?: string;
+    apiKey?: string;
+    apiSecret?: string;
+  }): Promise<{
+    bingx: { name?: string; avatar?: string; hasKeys?: boolean };
+  }> {
+    return this.request(AUTH_API, "/settings/api/bingx", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async setExchange(exchange: "asterdex" | "bingx"): Promise<{ exchange: string }> {
+    return this.request(AUTH_API, "/settings/exchange", {
+      method: "PUT",
+      body: JSON.stringify({ exchange }),
     });
   }
 
@@ -176,7 +198,7 @@ class ApiClient {
     });
   }
 
-  async getPrices(): Promise<
+  async getPrices(walletAddress?: string | null): Promise<
     Record<
       string,
       string | number | { price: string | number; priceChangePercent?: number | null }
@@ -184,7 +206,12 @@ class ApiClient {
   > {
     // Backend zwraca ceny jako obiekty: { price: "...", priceChangePercent: ... }
     // (lub stringi/number dla kompatybilności wstecznej)
-    return this.request(TRADING_API, "/api/trading/prices");
+    // Przekaż walletAddress w nagłówku, żeby backend wiedział z której giełdy pobrać ceny
+    const headers: Record<string, string> = {};
+    if (walletAddress) {
+      headers["X-Wallet-Address"] = walletAddress;
+    }
+    return this.request(TRADING_API, "/api/trading/prices", { headers });
   }
 
   async getAsterSymbols(): Promise<{

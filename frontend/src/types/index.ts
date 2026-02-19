@@ -71,6 +71,9 @@ export interface OrderSettings {
   // Para handlowa
   baseAsset?: string; // np. BTC
   quoteAsset?: string; // np. USDT (stable na spocie)
+  
+  // Giełda dla tego zlecenia
+  exchange?: "asterdex" | "bingx";
 
   // 2# Wymagania KUPNO/SPRZEDAŻ
   buy: BuySellSettings;
@@ -159,6 +162,7 @@ export interface UserSettings {
   wallet: WalletBalance[];
   orders: OrderSettings[];
   transactionHistory: Transaction[];
+  exchange?: "asterdex" | "bingx";
   createdAt: string;
   updatedAt: string;
 }

@@ -28,6 +28,7 @@ const defaultOrder: Omit<OrderSettingsType, "_id"> = {
   refreshInterval: 5,
   minProfitPercent: 0.5,
   focusPrice: 94000,
+  exchange: "asterdex", // Domyślnie AsterDex, będzie nadpisane przy tworzeniu
   timeToNewFocus: 0,
   buyTrendCounter: 0,
   sellTrendCounter: 0,
@@ -130,6 +131,7 @@ export default function Dashboard() {
     name?: string;
     avatar?: string;
     hasKeys?: boolean;
+    exchange?: "asterdex" | "bingx";
   } | null>(null);
 
   const orders = userSettings?.orders || [];
@@ -143,29 +145,35 @@ export default function Dashboard() {
   }, [orders, activeOrderIndex]);
   const activeGridState = activeOrder?._id ? gridStates[activeOrder._id] : null;
 
+  // Reset activeOrderIndex jeśli aktualne zlecenie nie istnieje (np. po zmianie giełdy)
+  useEffect(() => {
+    if (orders.length > 0 && activeOrderIndex >= orders.length) {
+      setActiveOrderIndex(0);
+    } else if (orders.length === 0 && activeOrderIndex !== 0) {
+      setActiveOrderIndex(0);
+    }
+  }, [orders.length, activeOrderIndex, setActiveOrderIndex]);
+
   useEffect(() => {
     const loadApiProfile = async () => {
       try {
-        // 1) Najpierw lokalny cache (np. po odświeżeniu strony)
-        if (typeof window !== "undefined") {
-          const raw = window.localStorage.getItem("gridbot_api_profile");
-          if (raw) {
-            try {
-              const parsed = JSON.parse(raw);
-              setApiProfile(parsed);
-            } catch {
-              // ignoruj błędny JSON
-            }
-          }
-        }
-
-        // 2) Potem aktualne dane z backendu
-        const data = await api.getApiSettings();
-        if (data?.aster) {
+        // Pobierz aktualną giełdę i dane API
+        const [apiData, settings] = await Promise.all([
+          api.getApiSettings(),
+          api.getSettings(),
+        ]);
+        
+        const currentExchange = settings?.exchange || "asterdex";
+        const exchangeData = currentExchange === "bingx" 
+          ? apiData?.bingx 
+          : apiData?.aster;
+        
+        if (exchangeData) {
           const next = {
-            name: data.aster.name,
-            avatar: data.aster.avatar,
-            hasKeys: !!data.aster.hasKeys,
+            name: exchangeData.name,
+            avatar: exchangeData.avatar,
+            hasKeys: !!exchangeData.hasKeys,
+            exchange: currentExchange as "asterdex" | "bingx",
           };
           setApiProfile(next);
           if (typeof window !== "undefined") {
@@ -180,7 +188,24 @@ export default function Dashboard() {
       }
     };
     loadApiProfile();
-  }, []);
+  }, [userSettings?.exchange]); // Odśwież gdy zmieni się giełda
+
+  // Odśwież zlecenia gdy zmieni się giełda
+  useEffect(() => {
+    if (!walletAddress) return;
+    
+    const refreshOrders = async () => {
+      try {
+        const updatedSettings = await api.getSettings();
+        setUserSettings(updatedSettings);
+        console.log(`🔄 Refreshed orders after exchange change: ${updatedSettings.orders?.length || 0} orders for ${updatedSettings.exchange}`);
+      } catch (e) {
+        console.error("Failed to refresh orders after exchange change:", e);
+      }
+    };
+    
+    refreshOrders();
+  }, [walletAddress, userSettings?.exchange, setUserSettings]);
 
   // Po starcie pobierz wszystkie stany GRID z backendu,
   // żeby zakładki znały realny isActive nawet po odświeżeniu strony.
@@ -216,9 +241,10 @@ export default function Dashboard() {
 
   useEffect(() => {
     // Fetch prices – co refreshInterval sekund (zgodnie z ustawieniem na froncie)
+    // Użyj walletAddress żeby backend wiedział z której giełdy pobrać ceny
     const fetchPrices = async () => {
       try {
-        const priceData = await api.getPrices();
+        const priceData = await api.getPrices(walletAddress);
         Object.entries(priceData as Record<string, any>).forEach(
           ([symbol, data]) => {
             let numPrice: number;
@@ -251,7 +277,7 @@ export default function Dashboard() {
     fetchPrices();
     const interval = setInterval(fetchPrices, priceRefreshIntervalMs);
     return () => clearInterval(interval);
-  }, [priceRefreshIntervalMs]);
+  }, [priceRefreshIntervalMs, walletAddress]);
 
   // Odśwież stan gridu aktywnego zlecenia – co refreshInterval tego zlecenia
   useEffect(() => {
@@ -277,9 +303,12 @@ export default function Dashboard() {
   const handleAddOrder = async () => {
     try {
       setIsLoading(true);
+      // Przypisz aktualną giełdę do nowego zlecenia
+      const currentExchange = userSettings?.exchange || "asterdex";
       const newOrder = await api.createOrder({
         ...defaultOrder,
         name: `Zlecenie ${orders.length + 1}`,
+        exchange: currentExchange, // Przypisz aktualną giełdę
       });
 
       if (userSettings) {
@@ -302,12 +331,15 @@ export default function Dashboard() {
     try {
       setIsLoading(true);
       const { _id, id, ...rest } = activeOrder as any;
+      // Zachowaj giełdę z oryginalnego zlecenia lub użyj aktualnej
+      const currentExchange = userSettings?.exchange || "asterdex";
       const copy = {
         ...rest,
         name: `Kopia: ${activeOrder.name}`,
         isActive: false,
         buyTrendCounter: 0,
         sellTrendCounter: 0,
+        exchange: rest.exchange || currentExchange, // Zachowaj giełdę z oryginału lub użyj aktualnej
       };
       const newOrder = await api.createOrder(copy);
 
@@ -392,10 +424,15 @@ export default function Dashboard() {
                   </div>
                   <div className="flex flex-col">
                     <span className="text-xs text-gray-300">
-                      {apiProfile.name || "Konto Aster"}
+                      {apiProfile.name || (apiProfile.exchange === "bingx" ? "Konto BingX" : "Konto Aster")}
                     </span>
                     <span className="text-[10px] text-gray-500">
                       {apiProfile.hasKeys ? "Klucze zapisane" : "Brak kluczy"}
+                      {apiProfile.exchange && (
+                        <span className="ml-1 text-gray-600">
+                          ({apiProfile.exchange === "bingx" ? "BingX" : "AsterDex"})
+                        </span>
+                      )}
                     </span>
                   </div>
                 </div>
@@ -403,7 +440,7 @@ export default function Dashboard() {
               <button
                 onClick={() => setShowApiSettings(true)}
                 className="p-2 rounded-lg hover:bg-grid-card transition-colors text-gray-400 hover:text-white"
-                title="Ustawienia API (AsterDex)"
+                title={`Ustawienia API (${apiProfile?.exchange === "bingx" ? "BingX" : "AsterDex"})`}
               >
                 <Settings className="w-5 h-5" />
               </button>

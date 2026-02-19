@@ -1,35 +1,94 @@
 import Decimal from "decimal.js";
 import * as AsterSpotService from "./AsterSpotService.js";
+import * as BingXService from "./BingXService.js";
 import * as WalletService from "./WalletService.js";
+import UserSettings from "../models/UserSettings.js";
 
-// Cache dla exchangeInfo (aby nie pobierać za każdym razem)
-let exchangeInfoCache = null;
-let exchangeInfoCacheTime = 0;
+// Cache dla exchangeInfo per giełda (aby nie pobierać za każdym razem)
+const exchangeInfoCache = new Map(); // exchange -> { data, time }
 const EXCHANGE_INFO_CACHE_MS = 5 * 60 * 1000; // 5 minut
+
+/**
+ * Czyści cache exchangeInfo dla wszystkich giełd (używane po zmianie giełdy)
+ */
+export function clearExchangeInfoCache() {
+  exchangeInfoCache.clear();
+  console.log('🔄 ExchangeInfo cache cleared');
+}
+
+/**
+ * Pobiera wybraną giełdę dla użytkownika (domyślnie "asterdex")
+ * @param {string} walletAddress - adres portfela
+ * @returns {Promise<"asterdex"|"bingx">}
+ */
+async function getExchange(walletAddress) {
+  if (!walletAddress) {
+    return "asterdex"; // Domyślnie AsterDex
+  }
+  
+  try {
+    const settings = await UserSettings.findOne({
+      walletAddress: walletAddress.toLowerCase(),
+    });
+    
+    const exchange = settings?.exchange || "asterdex";
+    return exchange === "bingx" ? "bingx" : "asterdex";
+  } catch (e) {
+    console.warn(`⚠️ Failed to get exchange for wallet=${walletAddress}:`, e.message);
+    return "asterdex";
+  }
+}
+
+/**
+ * Zwraca odpowiedni serwis giełdy
+ * @param {"asterdex"|"bingx"} exchange
+ * @returns {Object} - serwis giełdy
+ */
+function getExchangeService(exchange) {
+  return exchange === "bingx" ? BingXService : AsterSpotService;
+}
+
+/** Dla BingX symbole mogą być "ETH-USDT" lub "ETHUSDT" – porównujemy znormalizowane (bez - i _). */
+function symbolMatchesExchange(symbolFromExchange, symbolWeWant, exchange) {
+  const want = (symbolWeWant || "").toUpperCase();
+  const from = (symbolFromExchange || "").toUpperCase();
+  if (exchange === "bingx") {
+    return from.replace(/[-_]/g, "") === want.replace(/[-_]/g, "");
+  }
+  return from === want;
+}
 
 /**
  * Pobiera exchangeInfo dla symbolu (cache'uje przez 5 minut)
  * @param {string} symbol - np. "BTCUSDT"
+ * @param {string} walletAddress - adres portfela (do określenia giełdy)
  * @returns {Promise<{stepSize?: string, tickSize?: string}>}
  */
-async function getSymbolPrecision(symbol) {
+async function getSymbolPrecision(symbol, walletAddress = null) {
+  const exchange = await getExchange(walletAddress);
+  const exchangeService = getExchangeService(exchange);
+  
   const now = Date.now();
-  if (
-    !exchangeInfoCache ||
-    now - exchangeInfoCacheTime > EXCHANGE_INFO_CACHE_MS
-  ) {
+  const cacheKey = exchange;
+  const cached = exchangeInfoCache.get(cacheKey);
+  
+  if (!cached || now - cached.time > EXCHANGE_INFO_CACHE_MS) {
     try {
-      exchangeInfoCache = await AsterSpotService.fetchExchangeInfo();
-      exchangeInfoCacheTime = now;
+      const exchangeInfo = await exchangeService.fetchExchangeInfo();
+      exchangeInfoCache.set(cacheKey, {
+        data: exchangeInfo,
+        time: now,
+      });
     } catch (error) {
-      console.warn(`⚠️ Failed to fetch exchangeInfo: ${error.message}`);
+      console.warn(`⚠️ Failed to fetch exchangeInfo from ${exchange}: ${error.message}`);
       return { stepSize: null, tickSize: null };
     }
   }
 
+  const cachedData = exchangeInfoCache.get(cacheKey);
   const upperSymbol = symbol.toUpperCase();
-  const symbolInfo = exchangeInfoCache?.symbols?.find(
-    (s) => s.symbol === upperSymbol
+  const symbolInfo = cachedData?.data?.symbols?.find(
+    (s) => symbolMatchesExchange(s.symbol, upperSymbol, exchange)
   );
 
   if (!symbolInfo) {
@@ -62,28 +121,36 @@ async function getSymbolPrecision(symbol) {
 /**
  * Sprawdza czy symbol istnieje w exchangeInfo i zwraca informacje o dostępnych symbolach
  * @param {string} symbol - np. "XRPUSDT"
+ * @param {string} walletAddress - adres portfela (do określenia giełdy)
  * @returns {Promise<{valid: boolean, symbolInfo?: object, availableSymbols?: string[], error?: string}>}
  */
-async function validateSymbol(symbol) {
+async function validateSymbol(symbol, walletAddress = null) {
+  const exchange = await getExchange(walletAddress);
+  const exchangeService = getExchangeService(exchange);
+  
   const now = Date.now();
-  if (
-    !exchangeInfoCache ||
-    now - exchangeInfoCacheTime > EXCHANGE_INFO_CACHE_MS
-  ) {
+  const cacheKey = exchange;
+  const cached = exchangeInfoCache.get(cacheKey);
+  
+  if (!cached || now - cached.time > EXCHANGE_INFO_CACHE_MS) {
     try {
-      exchangeInfoCache = await AsterSpotService.fetchExchangeInfo();
-      exchangeInfoCacheTime = now;
+      const exchangeInfo = await exchangeService.fetchExchangeInfo();
+      exchangeInfoCache.set(cacheKey, {
+        data: exchangeInfo,
+        time: now,
+      });
     } catch (error) {
       return {
         valid: false,
-        error: `Failed to fetch exchangeInfo: ${error.message}`,
+        error: `Failed to fetch exchangeInfo from ${exchange}: ${error.message}`,
       };
     }
   }
 
+  const cachedData = exchangeInfoCache.get(cacheKey);
   const upperSymbol = symbol.toUpperCase();
-  const symbolInfo = exchangeInfoCache?.symbols?.find(
-    (s) => s.symbol === upperSymbol && s.status === "TRADING"
+  const symbolInfo = cachedData?.data?.symbols?.find(
+    (s) => symbolMatchesExchange(s.symbol, upperSymbol, exchange) && s.status === "TRADING"
   );
 
   if (symbolInfo) {
@@ -92,20 +159,21 @@ async function validateSymbol(symbol) {
 
   // Jeśli symbol nie istnieje, znajdź dostępne symbole dla tego baseAsset
   const [baseAsset, quoteAsset] = parseSymbol(symbol);
-  const availableSymbols = exchangeInfoCache?.symbols
+  const availableSymbols = cachedData?.data?.symbols
     ?.filter(
       (s) =>
-        s.baseAsset === baseAsset &&
-        s.quoteAsset === quoteAsset &&
+        (s.baseAsset === baseAsset || (exchange === "bingx" && (s.baseAsset || "").toUpperCase() === baseAsset)) &&
+        (s.quoteAsset === quoteAsset || (exchange === "bingx" && (s.quoteAsset || "").toUpperCase() === quoteAsset)) &&
         s.status === "TRADING"
     )
     .map((s) => s.symbol)
     .slice(0, 10) || [];
 
+  const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
   return {
     valid: false,
     availableSymbols,
-    error: `Symbol ${upperSymbol} is not available on AsterDex Spot. ${
+    error: `Symbol ${upperSymbol} is not available on ${exchangeName} Spot. ${
       availableSymbols.length > 0
         ? `Available symbols for ${baseAsset}/${quoteAsset}: ${availableSymbols.join(", ")}`
         : `No trading pairs found for ${baseAsset}/${quoteAsset} on Spot.`
@@ -192,7 +260,7 @@ function logPaperModeOnce() {
   console.log(
     paper
       ? "📋 Paper trading: WŁĄCZONY (zlecenia symulowane)"
-      : "💰 Paper trading: WYŁĄCZONY (realne zlecenia na AsterDex)"
+      : "💰 Paper trading: WYŁĄCZONY (realne zlecenia)"
   );
 }
 
@@ -222,30 +290,34 @@ export async function placeSpotBuy(
   }
 
   try {
+    const exchange = await getExchange(walletAddress);
+    const exchangeService = getExchangeService(exchange);
+    const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
+    
     // Walidacja symbolu przed wysłaniem zlecenia
-    const validation = await validateSymbol(symbol);
+    const validation = await validateSymbol(symbol, walletAddress);
     if (!validation.valid) {
       console.error(`❌ Invalid symbol ${symbol}:`, validation.error);
       return {
         success: false,
-        error: validation.error || `Symbol ${symbol} is not available on AsterDex Spot`,
+        error: validation.error || `Symbol ${symbol} is not available on ${exchangeName} Spot`,
       };
     }
 
     // Pobierz precyzję dla symbolu (dla quoteOrderQty)
-    const precision = await getSymbolPrecision(symbol);
+    const precision = await getSymbolPrecision(symbol, walletAddress);
     const roundedQuoteQty = roundQuoteOrderQty(
       quoteAmount,
       precision.quotePrecision
     );
 
     console.log(
-      `📊 BUY precision for ${symbol}: quotePrecision=${
+      `📊 BUY precision for ${symbol} (${exchangeName}): quotePrecision=${
         precision.quotePrecision
       }, quoteQty=${quoteAmount.toString()} -> ${roundedQuoteQty}`
     );
 
-    // Realne zlecenie MARKET BUY na AsterDex
+    // Realne zlecenie MARKET BUY
     // Dla MARKET BUY używamy quoteOrderQty (ile quote currency wydać)
     const orderParams = {
       symbol: symbol.toUpperCase(),
@@ -254,7 +326,7 @@ export async function placeSpotBuy(
       quoteOrderQty: roundedQuoteQty,
     };
 
-    const orderResult = await AsterSpotService.placeOrder(
+    const orderResult = await exchangeService.placeOrder(
       orderParams,
       walletAddress
     );
@@ -273,7 +345,7 @@ export async function placeSpotBuy(
       );
 
       console.log(
-        `✅ Real BUY executed on AsterDex: ${symbol} qty=${executedQty} avgPrice=${avgPrice} orderId=${orderResult.orderId}`
+        `✅ Real BUY executed on ${exchangeName}: ${symbol} qty=${executedQty} avgPrice=${avgPrice} orderId=${orderResult.orderId}`
       );
 
       return {
@@ -289,7 +361,9 @@ export async function placeSpotBuy(
       error: "Order placed but no orderId returned",
     };
   } catch (error) {
-    console.error(`❌ Failed to place BUY order on AsterDex:`, error.message);
+    const exchange = await getExchange(walletAddress);
+    const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
+    console.error(`❌ Failed to place BUY order on ${exchangeName}:`, error.message);
     return {
       success: false,
       error: error.message || "Failed to place order",
@@ -318,18 +392,22 @@ export async function placeSpotSell(
   }
 
   try {
+    const exchange = await getExchange(walletAddress);
+    const exchangeService = getExchangeService(exchange);
+    const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
+    
     // Walidacja symbolu przed wysłaniem zlecenia
-    const validation = await validateSymbol(symbol);
+    const validation = await validateSymbol(symbol, walletAddress);
     if (!validation.valid) {
       console.error(`❌ Invalid symbol ${symbol}:`, validation.error);
       return {
         success: false,
-        error: validation.error || `Symbol ${symbol} is not available on AsterDex Spot`,
+        error: validation.error || `Symbol ${symbol} is not available on ${exchangeName} Spot`,
       };
     }
 
     // Pobierz precyzję dla symbolu (stepSize dla quantity)
-    const precision = await getSymbolPrecision(symbol);
+    const precision = await getSymbolPrecision(symbol, walletAddress);
     const roundedQuantity = roundQuantityToStepSize(
       baseAmount,
       precision.stepSize,
@@ -340,12 +418,12 @@ export async function placeSpotSell(
     const roundedQtyDecimal = new Decimal(roundedQuantity);
     const orderValue = roundedQtyDecimal.mul(expectedPrice);
     console.log(
-      `📊 SELL precision for ${symbol}: stepSize=${
+      `📊 SELL precision for ${symbol} (${exchangeName}): stepSize=${
         precision.stepSize
       }, qty=${baseAmount.toString()} -> ${roundedQuantity}, value=${orderValue.toFixed(2)} USDT`
     );
 
-    // Realne zlecenie MARKET SELL na AsterDex
+    // Realne zlecenie MARKET SELL
     // Dla MARKET SELL używamy quantity (ile base currency sprzedać)
     const orderParams = {
       symbol: symbol.toUpperCase(),
@@ -354,7 +432,7 @@ export async function placeSpotSell(
       quantity: roundedQuantity,
     };
 
-    const orderResult = await AsterSpotService.placeOrder(
+    const orderResult = await exchangeService.placeOrder(
       orderParams,
       walletAddress
     );
@@ -385,7 +463,7 @@ export async function placeSpotSell(
       );
 
       console.log(
-        `✅ Real SELL executed on AsterDex: ${symbol} qty=${executedQty} avgPrice=${avgPrice} orderId=${orderResult.orderId}`
+        `✅ Real SELL executed on ${exchangeName}: ${symbol} qty=${executedQty} avgPrice=${avgPrice} orderId=${orderResult.orderId}`
       );
 
       return {
@@ -401,7 +479,9 @@ export async function placeSpotSell(
       error: "Order placed but no orderId returned",
     };
   } catch (error) {
-    console.error(`❌ Failed to place SELL order on AsterDex:`, error.message);
+    const exchange = await getExchange(walletAddress);
+    const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
+    console.error(`❌ Failed to place SELL order on ${exchangeName}:`, error.message);
     return {
       success: false,
       error: error.message || "Failed to place order",
@@ -539,4 +619,5 @@ async function syncWalletAfterTrade(
 export default {
   placeSpotBuy,
   placeSpotSell,
+  clearExchangeInfoCache,
 };
