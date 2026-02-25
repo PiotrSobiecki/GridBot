@@ -40,11 +40,18 @@ const AMOUNT_SCALE = 8;
 const DEFAULT_FEE_PERCENT = new Decimal("0.1");
 
 // Ścieżki do plików z logami transakcji
-const TRANSACTIONS_BUY_FILE = path.join(__dirname, "../../../logs/transactions-buy.json");
-const TRANSACTIONS_SELL_FILE = path.join(__dirname, "../../../logs/transactions-sell.json");
+const TRANSACTIONS_BUY_FILE = path.join(
+  __dirname,
+  "../../../logs/transactions-buy.json",
+);
+const TRANSACTIONS_SELL_FILE = path.join(
+  __dirname,
+  "../../../logs/transactions-sell.json",
+);
 
 // Sprawdź czy logowanie do JSON jest włączone (domyślnie tylko w dev, nie w produkcji)
-const ENABLE_JSON_LOGGING = process.env.NODE_ENV !== "production" || 
+const ENABLE_JSON_LOGGING =
+  process.env.NODE_ENV !== "production" ||
   process.env.ENABLE_TRANSACTION_LOGS === "1";
 
 /**
@@ -83,7 +90,7 @@ async function logBuyTransaction(transactionData) {
     await fs.writeFile(
       TRANSACTIONS_BUY_FILE,
       JSON.stringify(transactions, null, 2),
-      "utf-8"
+      "utf-8",
     );
   } catch (error) {
     console.error("Error logging buy transaction:", error);
@@ -126,7 +133,7 @@ async function logSellTransaction(transactionData) {
     await fs.writeFile(
       TRANSACTIONS_SELL_FILE,
       JSON.stringify(transactions, null, 2),
-      "utf-8"
+      "utf-8",
     );
   } catch (error) {
     console.error("Error logging sell transaction:", error);
@@ -204,7 +211,10 @@ export async function processPrice(
   if (shouldBuy(price, state, settings)) {
     await executeBuy(price, state, settings);
     // Po wykonaniu zakupu przeładuj stan z bazy, aby kolejne sprawdzenia używały zaktualizowanego focusPrice
-    const updatedState = await GridState.findByWalletAndOrderId(walletAddress, orderId);
+    const updatedState = await GridState.findByWalletAndOrderId(
+      walletAddress,
+      orderId,
+    );
     if (updatedState) {
       Object.assign(state, updatedState.toJSON());
       // Przerwij przetwarzanie - poczekaj na następny cykl schedulera
@@ -218,7 +228,10 @@ export async function processPrice(
   const buySellExecuted = await checkAndExecuteBuySells(price, state, settings);
   if (buySellExecuted) {
     // Po zamknięciu pozycji long przeładuj stan z bazy
-    const updatedState = await GridState.findByWalletAndOrderId(walletAddress, orderId);
+    const updatedState = await GridState.findByWalletAndOrderId(
+      walletAddress,
+      orderId,
+    );
     if (updatedState) {
       Object.assign(state, updatedState.toJSON());
       // Przerwij przetwarzanie - poczekaj na następny cykl schedulera
@@ -232,7 +245,10 @@ export async function processPrice(
   if (shouldSellShort(price, state, settings)) {
     await executeSellShort(price, state, settings);
     // Po wykonaniu sprzedaży przeładuj stan z bazy
-    const updatedState = await GridState.findByWalletAndOrderId(walletAddress, orderId);
+    const updatedState = await GridState.findByWalletAndOrderId(
+      walletAddress,
+      orderId,
+    );
     if (updatedState) {
       Object.assign(state, updatedState.toJSON());
       // Przerwij przetwarzanie - poczekaj na następny cykl schedulera
@@ -246,7 +262,10 @@ export async function processPrice(
   // Funkcja sprawdza wszystkie pozycje short i zamyka te które spełniają warunki
   await checkAndExecuteSellBuybacks(price, state, settings);
   // Po sprawdzeniu wszystkich pozycji short przeładuj stan z bazy
-  const updatedStateAfterSell = await GridState.findByWalletAndOrderId(walletAddress, orderId);
+  const updatedStateAfterSell = await GridState.findByWalletAndOrderId(
+    walletAddress,
+    orderId,
+  );
   if (updatedStateAfterSell) {
     Object.assign(state, updatedStateAfterSell.toJSON());
   }
@@ -300,7 +319,11 @@ async function canExecuteBuy(transactionValue, state, settings) {
   // Na spocie jako stable używamy USDT
   const currency = buySettings.currency || "USDT";
   const exchange = settings.exchange || "asterdex";
-  const walletBalance = await WalletService.getBalance(state.walletAddress, currency, exchange);
+  const walletBalance = await WalletService.getBalance(
+    state.walletAddress,
+    currency,
+    exchange,
+  );
   const walletProtection = new Decimal(buySettings.walletProtection || 0);
   const availableBalance = walletBalance.minus(walletProtection);
 
@@ -374,7 +397,11 @@ async function canExecuteSell(amount, state, settings) {
 
   const currency = sellSettings.currency || "BTC";
   const exchange = settings.exchange || "asterdex";
-  const walletBalance = await WalletService.getBalance(state.walletAddress, currency, exchange);
+  const walletBalance = await WalletService.getBalance(
+    state.walletAddress,
+    currency,
+    exchange,
+  );
   const walletProtection = new Decimal(sellSettings.walletProtection || 0);
   const availableBalance = walletBalance.minus(walletProtection);
 
@@ -394,7 +421,7 @@ function meetsMinTransactionValue(transactionValue, settings) {
     // Minimalna wartość z ustawień (jeśli użytkownik chce wyższy próg)
 
     // Minimalna wartość narzucona przez giełdę
-    const exchangeMin = new Decimal(5); // 5 USDT
+    const exchangeMin = new Decimal(4); // 4 USDT
 
     const effectiveMin = exchangeMin;
 
@@ -681,28 +708,29 @@ async function executeBuy(currentPrice, state, settings) {
   state.totalBoughtValue = new Decimal(state.totalBoughtValue || 0)
     .plus(transactionValue)
     .toNumber();
-  
+
   // Focus zmienia się na cenę zakupu - to jest nowa baza dla kolejnych zakupów
   // Po każdym zakupie focus = cena zakupu, a następny cel zakupu jest niższy o procent odpowiadający następnemu trendowi
   state.currentFocusPrice = buyPriceNum;
   state.focusLastUpdated = new Date().toISOString();
-  
+
   // Następny cel zakupu obliczamy dla następnego trendu (zwiększonego)
   // Jeśli trend osiągnął max, następny cel jest dla trendu 0 (cykl się powtarza)
   // nextBuyTarget = focus - (focus * trendPercent / 100) - zawsze niższy niż focus
-  const nextTrend = state.buyTrendCounter >= maxTrend ? 0 : state.buyTrendCounter;
+  const nextTrend =
+    state.buyTrendCounter >= maxTrend ? 0 : state.buyTrendCounter;
   state.nextBuyTarget = calculateNextBuyTarget(
     new Decimal(buyPriceNum), // Focus = cena zakupu (nowa baza)
     nextTrend, // Następny trend (zwiększony lub 0 jeśli osiągnięto max)
     settings,
   ).toNumber();
-  
+
   if (DEBUG_CONDITIONS) {
     const trendPercent = getTrendPercent(nextTrend, settings, true);
     console.log(
       `🔍 BUY focus updated: price=${buyPriceNum}, trend=${currentTrend}→${state.buyTrendCounter}, ` +
-      `nextTrend=${nextTrend} (${trendPercent}%), nextBuyTarget=${state.nextBuyTarget} ` +
-      `(spadek: ${((buyPriceNum - state.nextBuyTarget) / buyPriceNum * 100).toFixed(2)}%)`
+        `nextTrend=${nextTrend} (${trendPercent}%), nextBuyTarget=${state.nextBuyTarget} ` +
+        `(spadek: ${(((buyPriceNum - state.nextBuyTarget) / buyPriceNum) * 100).toFixed(2)}%)`,
     );
   }
 
@@ -712,8 +740,9 @@ async function executeBuy(currentPrice, state, settings) {
 
   // Oblicz szczegółowe źródło kwoty zakupu - krok po kroku
   const trendPercent = getTrendPercent(currentTrend, settings, true);
-  const minValuePer1Percent = settings.buyConditions?.minValuePer1Percent || 200;
-  
+  const minValuePer1Percent =
+    settings.buyConditions?.minValuePer1Percent || 200;
+
   // Krok 1: Oblicz podstawową wartość
   const baseValueStep1 = minValuePer1Percent * trendPercent.toNumber();
   let calculationSteps = [
@@ -724,10 +753,10 @@ async function executeBuy(currentPrice, state, settings) {
       values: {
         minValuePer1Percent: minValuePer1Percent,
         trendPercent: trendPercent.toNumber().toFixed(4),
-        result: baseValueStep1.toFixed(2)
+        result: baseValueStep1.toFixed(2),
       },
-      result: baseValueStep1
-    }
+      result: baseValueStep1,
+    },
   ];
 
   // Krok 2: Sprawdź faktyczny spadek ceny
@@ -735,10 +764,15 @@ async function executeBuy(currentPrice, state, settings) {
   try {
     const focus = new Decimal(state.currentFocusPrice || 0);
     if (!focus.isZero()) {
-      actualDropPercent = focus.minus(currentPrice).div(focus).mul(100).toDecimalPlaces(1, Decimal.ROUND_DOWN).toNumber();
+      actualDropPercent = focus
+        .minus(currentPrice)
+        .div(focus)
+        .mul(100)
+        .toDecimalPlaces(1, Decimal.ROUND_DOWN)
+        .toNumber();
     }
   } catch {}
-  
+
   calculationSteps.push({
     step: 2,
     description: "Faktyczny spadek ceny od focus",
@@ -746,14 +780,18 @@ async function executeBuy(currentPrice, state, settings) {
     values: {
       focusPrice: (state.currentFocusPrice || 0).toFixed(2),
       currentPrice: currentPrice.toNumber().toFixed(2),
-      actualDropPercent: actualDropPercent != null ? actualDropPercent.toFixed(2) + "%" : "brak focus",
+      actualDropPercent:
+        actualDropPercent != null
+          ? actualDropPercent.toFixed(2) + "%"
+          : "brak focus",
       trendPercentFromSettings: trendPercent.toNumber().toFixed(4) + "%",
       effectiveTrendPercent: effectiveTrendPercent.toNumber().toFixed(4) + "%",
-      note: actualDropPercent != null && actualDropPercent > trendPercent.toNumber() 
-        ? "Użyto faktycznego spadku (większy niż trend z ustawień)" 
-        : "Użyto trendPercent z ustawień"
+      note:
+        actualDropPercent != null && actualDropPercent > trendPercent.toNumber()
+          ? "Użyto faktycznego spadku (większy niż trend z ustawień)"
+          : "Użyto trendPercent z ustawień",
     },
-    result: effectiveTrendPercent.toNumber()
+    result: effectiveTrendPercent.toNumber(),
   });
 
   // Krok 3: Dodatkowe wartości z progów cenowych
@@ -781,9 +819,9 @@ async function executeBuy(currentPrice, state, settings) {
         priceRange: `[${additionalThreshold?.minPrice ?? "-"}, ${additionalThreshold?.maxPrice ?? "-"}]`,
         additionalValue: additionalThreshold?.value || 0,
         trendPercent: trendPercent.toNumber().toFixed(4),
-        result: additionalValueStep3.toFixed(2)
+        result: additionalValueStep3.toFixed(2),
       },
-      result: additionalValueStep3
+      result: additionalValueStep3,
     });
   }
 
@@ -796,9 +834,9 @@ async function executeBuy(currentPrice, state, settings) {
     values: {
       baseValue: baseValueStep1.toFixed(2),
       additionalValue: additionalValueStep3.toFixed(2),
-      result: valueBeforeMax.toFixed(2)
+      result: valueBeforeMax.toFixed(2),
     },
-    result: valueBeforeMax
+    result: valueBeforeMax,
   });
 
   // Krok 5: Ograniczenie maksymalnej wartości
@@ -828,22 +866,26 @@ async function executeBuy(currentPrice, state, settings) {
         maxValue: maxValueStep5.toFixed(2),
         priceRange: `[${maxThreshold?.minPrice ?? "-"}, ${maxThreshold?.maxPrice ?? "-"}]`,
         result: maxValueStep5.toFixed(2),
-        note: "Wartość została ograniczona do maksimum"
+        note: "Wartość została ograniczona do maksimum",
       },
-      result: maxValueStep5
+      result: maxValueStep5,
     });
   }
 
   // Krok 6: Finalna obliczona wartość transakcji
-  const finalCalculatedValue = maxValueStep5 != null ? maxValueStep5 : valueBeforeMax;
+  const finalCalculatedValue =
+    maxValueStep5 != null ? maxValueStep5 : valueBeforeMax;
   calculationSteps.push({
     step: calculationSteps.length + 1,
     description: "Finalna obliczona wartość transakcji",
-    formula: maxValueStep5 != null ? "wartośćPrzedMax ograniczona do maxValue" : "baseValue + additionalValue",
+    formula:
+      maxValueStep5 != null
+        ? "wartośćPrzedMax ograniczona do maxValue"
+        : "baseValue + additionalValue",
     values: {
-      result: finalCalculatedValue.toFixed(2)
+      result: finalCalculatedValue.toFixed(2),
     },
-    result: finalCalculatedValue
+    result: finalCalculatedValue,
   });
 
   // Krok 7: Obliczona ilość
@@ -855,9 +897,9 @@ async function executeBuy(currentPrice, state, settings) {
     values: {
       transactionValue: finalCalculatedValue.toFixed(2),
       currentPrice: currentPrice.toNumber().toFixed(2),
-      result: calculatedAmount.toFixed(8)
+      result: calculatedAmount.toFixed(8),
     },
-    result: calculatedAmount
+    result: calculatedAmount,
   });
 
   // Krok 8: Rzeczywiste wartości z giełdy
@@ -869,10 +911,14 @@ async function executeBuy(currentPrice, state, settings) {
       executedPrice: buyPriceNum.toFixed(2),
       executedAmount: amountNum.toFixed(8),
       executedValue: buyValueNum.toFixed(2),
-      priceSource: exchangeResult.avgPrice ? "exchange (avgPrice)" : "currentPrice (fallback)",
-      amountSource: exchangeResult.executedQty ? "exchange (executedQty)" : "calculated (fallback)"
+      priceSource: exchangeResult.avgPrice
+        ? "exchange (avgPrice)"
+        : "currentPrice (fallback)",
+      amountSource: exchangeResult.executedQty
+        ? "exchange (executedQty)"
+        : "calculated (fallback)",
     },
-    result: buyValueNum
+    result: buyValueNum,
   });
 
   const calculationDetails = {
@@ -883,9 +929,9 @@ async function executeBuy(currentPrice, state, settings) {
       calculatedTransactionValue: finalCalculatedValue.toFixed(2),
       executedValue: buyValueNum.toFixed(2),
       currentPrice: currentPrice.toNumber().toFixed(2),
-      executedPrice: buyPriceNum.toFixed(2)
+      executedPrice: buyPriceNum.toFixed(2),
     },
-    steps: calculationSteps
+    steps: calculationSteps,
   };
 
   // Loguj transakcję zakupu do pliku JSON
@@ -918,19 +964,22 @@ async function checkAndExecuteBuySells(currentPrice, state, settings) {
   // To zapewni, że wszystkie otwarte pozycje są sprawdzane, nawet jeśli openPositionIds jest nieaktualne
   const allOpenPositions = await Position.findByWalletAndOrderId(
     state.walletAddress,
-    state.orderId
+    state.orderId,
   );
   const actualOpenPositions = allOpenPositions.filter(
-    (p) => (p.type === "BUY" || !p.type) && p.status === PositionStatus.OPEN
+    (p) => (p.type === "BUY" || !p.type) && p.status === PositionStatus.OPEN,
   );
-  
+
   // Zaktualizuj openPositionIds jeśli różni się od rzeczywistych otwartych pozycji
   const actualOpenIds = actualOpenPositions.map((p) => p.id);
-  if (JSON.stringify(state.openPositionIds.sort()) !== JSON.stringify(actualOpenIds.sort())) {
+  if (
+    JSON.stringify(state.openPositionIds.sort()) !==
+    JSON.stringify(actualOpenIds.sort())
+  ) {
     if (DEBUG_CONDITIONS) {
       console.log(
         `🔍 BUY_SELL syncing openPositionIds: was ${state.openPositionIds.length}, now ${actualOpenIds.length} ` +
-        `wallet=${state.walletAddress} order=${state.orderId}`
+          `wallet=${state.walletAddress} order=${state.orderId}`,
       );
     }
     state.openPositionIds = actualOpenIds;
@@ -940,7 +989,7 @@ async function checkAndExecuteBuySells(currentPrice, state, settings) {
   if (!state.openPositionIds || state.openPositionIds.length === 0) {
     if (DEBUG_CONDITIONS) {
       console.log(
-        `🔍 BUY_SELL skipped (no open positions) wallet=${state.walletAddress} order=${state.orderId}`
+        `🔍 BUY_SELL skipped (no open positions) wallet=${state.walletAddress} order=${state.orderId}`,
       );
     }
     return false;
@@ -951,8 +1000,8 @@ async function checkAndExecuteBuySells(currentPrice, state, settings) {
   if (DEBUG_CONDITIONS && positions.length > 0) {
     console.log(
       `🔍 BUY_SELL checking ${positions.length} positions wallet=${state.walletAddress} order=${state.orderId} ` +
-      `currentPrice=${currentPrice.toNumber()} ` +
-      `openPositionIds=${JSON.stringify(state.openPositionIds)}`
+        `currentPrice=${currentPrice.toNumber()} ` +
+        `openPositionIds=${JSON.stringify(state.openPositionIds)}`,
     );
   }
 
@@ -968,7 +1017,7 @@ async function checkAndExecuteBuySells(currentPrice, state, settings) {
       if (DEBUG_CONDITIONS) {
         console.log(
           `🔍 BUY_SELL skipped (price threshold) wallet=${state.walletAddress} order=${state.orderId} ` +
-          `currentPrice=${currentPrice.toNumber()} < threshold=${priceThreshold}`
+            `currentPrice=${currentPrice.toNumber()} < threshold=${priceThreshold}`,
         );
       }
       return false; // Zawsze respektuj próg – nie zamykaj pozycji poniżej progu
@@ -977,7 +1026,7 @@ async function checkAndExecuteBuySells(currentPrice, state, settings) {
       if (DEBUG_CONDITIONS) {
         console.log(
           `🔍 BUY_SELL skipped (threshold+no profit) wallet=${state.walletAddress} order=${state.orderId} ` +
-          `currentPrice=${currentPrice.toNumber()} < threshold=${priceThreshold}, totalProfit=${state.totalProfit}`
+            `currentPrice=${currentPrice.toNumber()} < threshold=${priceThreshold}, totalProfit=${state.totalProfit}`,
         );
       }
       return false; // Poniżej progu i bez zysku – nie sprzedawaj
@@ -987,23 +1036,23 @@ async function checkAndExecuteBuySells(currentPrice, state, settings) {
   let executed = false;
   let executedCount = 0;
   const maxExecutionsPerCycle = 10; // Maksymalna liczba pozycji do zamknięcia w jednym cyklu (zabezpieczenie)
-  
+
   for (const position of positions) {
     if (position.status !== PositionStatus.OPEN) {
       if (DEBUG_CONDITIONS) {
         console.log(
           `🔍 BUY_SELL skipped (not OPEN) wallet=${state.walletAddress} order=${state.orderId} ` +
-          `position=${position.id} status=${position.status}`
+            `position=${position.id} status=${position.status}`,
         );
       }
       continue;
     }
-    
+
     if (!position.targetSellPrice) {
       if (DEBUG_CONDITIONS) {
         console.log(
           `🔍 BUY_SELL skipped (no target) wallet=${state.walletAddress} order=${state.orderId} ` +
-          `position=${position.id} - brak targetSellPrice`
+            `position=${position.id} - brak targetSellPrice`,
         );
       }
       continue;
@@ -1011,12 +1060,12 @@ async function checkAndExecuteBuySells(currentPrice, state, settings) {
 
     const targetPrice = new Decimal(position.targetSellPrice);
     const priceReached = currentPrice.gte(targetPrice);
-    
+
     if (DEBUG_CONDITIONS) {
       console.log(
         `🔍 BUY_SELL check position=${position.id} wallet=${state.walletAddress} order=${state.orderId} ` +
-        `currentPrice=${currentPrice.toNumber()} targetSellPrice=${targetPrice.toNumber()} ` +
-        `reached=${priceReached}`
+          `currentPrice=${currentPrice.toNumber()} targetSellPrice=${targetPrice.toNumber()} ` +
+          `reached=${priceReached}`,
       );
     }
 
@@ -1024,16 +1073,19 @@ async function checkAndExecuteBuySells(currentPrice, state, settings) {
       if (DEBUG_CONDITIONS) {
         console.log(
           `✅ BUY_SELL executing position=${position.id} wallet=${state.walletAddress} order=${state.orderId} ` +
-          `currentPrice=${currentPrice.toNumber()} targetSellPrice=${targetPrice.toNumber()}`
+            `currentPrice=${currentPrice.toNumber()} targetSellPrice=${targetPrice.toNumber()}`,
         );
       }
-      
+
       // Przeładuj stan przed każdym zamknięciem, aby mieć aktualne dane
-      const currentState = await GridState.findByWalletAndOrderId(state.walletAddress, state.orderId);
+      const currentState = await GridState.findByWalletAndOrderId(
+        state.walletAddress,
+        state.orderId,
+      );
       if (currentState) {
         Object.assign(state, currentState.toJSON());
       }
-      
+
       try {
         await executeBuySell(currentPrice, position, state, settings);
       } catch (e) {
@@ -1045,31 +1097,34 @@ async function checkAndExecuteBuySells(currentPrice, state, settings) {
       }
       executed = true;
       executedCount++;
-      
+
       // Przerwij jeśli osiągnięto limit (zabezpieczenie przed zbyt wieloma transakcjami w jednym cyklu)
       if (executedCount >= maxExecutionsPerCycle) {
         if (DEBUG_CONDITIONS) {
           console.log(
-            `⚠️ BUY_SELL limit reached: ${executedCount} positions closed in this cycle`
+            `⚠️ BUY_SELL limit reached: ${executedCount} positions closed in this cycle`,
           );
         }
         break;
       }
-      
+
       // Po zamknięciu pozycji przeładuj stan z bazy przed sprawdzeniem następnej
-      const updatedState = await GridState.findByWalletAndOrderId(state.walletAddress, state.orderId);
+      const updatedState = await GridState.findByWalletAndOrderId(
+        state.walletAddress,
+        state.orderId,
+      );
       if (updatedState) {
         Object.assign(state, updatedState.toJSON());
       }
     }
   }
-  
+
   if (executed && DEBUG_CONDITIONS) {
     console.log(
-      `✅ BUY_SELL completed: ${executedCount} position(s) closed wallet=${state.walletAddress} order=${state.orderId}`
+      `✅ BUY_SELL completed: ${executedCount} position(s) closed wallet=${state.walletAddress} order=${state.orderId}`,
     );
   }
-  
+
   return executed;
 }
 
@@ -1124,17 +1179,21 @@ async function executeBuySell(currentPrice, position, state, settings) {
   // Użyj rzeczywistej wykonanej ilości i średniej ceny z giełdy
   let executedAmount = exchangeResult.executedQty;
   let executedPrice = exchangeResult.avgPrice;
-  
+
   // Konwersja do Decimal jeśli potrzeba
   if (executedAmount != null && !(executedAmount instanceof Decimal)) {
     executedAmount = new Decimal(executedAmount);
   } else if (executedAmount == null || executedAmount.isZero()) {
     executedAmount = amount;
   }
-  
+
   if (executedPrice != null && !(executedPrice instanceof Decimal)) {
     executedPrice = new Decimal(executedPrice);
-  } else if (executedPrice == null || executedPrice.isZero() || executedPrice.lte(0)) {
+  } else if (
+    executedPrice == null ||
+    executedPrice.isZero() ||
+    executedPrice.lte(0)
+  ) {
     executedPrice = new Decimal(currentPrice);
   }
 
@@ -1199,8 +1258,8 @@ async function executeBuySell(currentPrice, position, state, settings) {
 
   console.log(
     `🔴 SELL executed: position=${position.id} price=${finalSellPrice}, amount=${executedAmountNum}, ` +
-    `buyValue=${position.buyValue}, sellValue=${executedSellValueNum}, ` +
-    `profit=${executedProfitNum}, trend→${state.buyTrendCounter} focus=${finalSellPrice}`,
+      `buyValue=${position.buyValue}, sellValue=${executedSellValueNum}, ` +
+      `profit=${executedProfitNum}, trend→${state.buyTrendCounter} focus=${finalSellPrice}`,
   );
 
   // Oblicz szczegółowe źródło kwoty sprzedaży - krok po kroku
@@ -1212,9 +1271,9 @@ async function executeBuySell(currentPrice, position, state, settings) {
       values: {
         buyPrice: position.buyPrice.toFixed(2),
         buyAmount: position.amount.toFixed(8),
-        buyValue: position.buyValue.toFixed(2)
+        buyValue: position.buyValue.toFixed(2),
       },
-      result: position.buyValue
+      result: position.buyValue,
     },
     {
       step: 2,
@@ -1222,9 +1281,9 @@ async function executeBuySell(currentPrice, position, state, settings) {
       formula: "Cena pobrana z PriceFeedService",
       values: {
         currentPrice: currentPrice.toNumber().toFixed(2),
-        source: "PriceFeedService.getPrice()"
+        source: "PriceFeedService.getPrice()",
       },
-      result: currentPrice.toNumber()
+      result: currentPrice.toNumber(),
     },
     {
       step: 3,
@@ -1233,9 +1292,11 @@ async function executeBuySell(currentPrice, position, state, settings) {
       values: {
         buyAmount: position.amount.toFixed(8),
         currentPrice: currentPrice.toNumber().toFixed(2),
-        calculatedSellValue: (position.amount * currentPrice.toNumber()).toFixed(2)
+        calculatedSellValue: (
+          position.amount * currentPrice.toNumber()
+        ).toFixed(2),
       },
-      result: position.amount * currentPrice.toNumber()
+      result: position.amount * currentPrice.toNumber(),
     },
     {
       step: 4,
@@ -1245,10 +1306,14 @@ async function executeBuySell(currentPrice, position, state, settings) {
         executedPrice: finalSellPrice.toFixed(2),
         executedAmount: executedAmountNum.toFixed(8),
         executedSellValue: executedSellValueNum.toFixed(2),
-        priceSource: exchangeResult.avgPrice ? "exchange (avgPrice)" : "currentPrice (fallback)",
-        amountSource: exchangeResult.executedQty ? "exchange (executedQty)" : "position.amount (fallback)"
+        priceSource: exchangeResult.avgPrice
+          ? "exchange (avgPrice)"
+          : "currentPrice (fallback)",
+        amountSource: exchangeResult.executedQty
+          ? "exchange (executedQty)"
+          : "position.amount (fallback)",
       },
-      result: executedSellValueNum
+      result: executedSellValueNum,
     },
     {
       step: 5,
@@ -1258,10 +1323,11 @@ async function executeBuySell(currentPrice, position, state, settings) {
         executedSellValue: executedSellValueNum.toFixed(2),
         buyValue: position.buyValue.toFixed(2),
         profit: executedProfitNum.toFixed(2),
-        profitPercent: ((executedProfitNum / position.buyValue) * 100).toFixed(2) + "%"
+        profitPercent:
+          ((executedProfitNum / position.buyValue) * 100).toFixed(2) + "%",
       },
-      result: executedProfitNum
-    }
+      result: executedProfitNum,
+    },
   ];
 
   const sellCalculationDetails = {
@@ -1271,9 +1337,10 @@ async function executeBuySell(currentPrice, position, state, settings) {
       executedPrice: finalSellPrice.toFixed(2),
       executedSellValue: executedSellValueNum.toFixed(2),
       profit: executedProfitNum.toFixed(2),
-      profitPercent: ((executedProfitNum / position.buyValue) * 100).toFixed(2) + "%"
+      profitPercent:
+        ((executedProfitNum / position.buyValue) * 100).toFixed(2) + "%",
     },
-    steps: sellCalculationSteps
+    steps: sellCalculationSteps,
   };
 
   // Loguj zamknięcie pozycji long (sprzedaż) do pliku JSON
@@ -1518,20 +1585,24 @@ async function executeSellShort(currentPrice, state, settings) {
   // Zabezpieczenie: jeśli giełda zwróci 0/undefined, użyj naszych wartości.
   let executedAmount = exchangeResult.executedQty;
   let executedPrice = exchangeResult.avgPrice;
-  
+
   // Konwersja do Decimal jeśli potrzeba
   if (executedAmount != null && !(executedAmount instanceof Decimal)) {
     executedAmount = new Decimal(executedAmount);
   } else if (executedAmount == null || executedAmount.isZero()) {
     executedAmount = amount;
   }
-  
+
   if (executedPrice != null && !(executedPrice instanceof Decimal)) {
     executedPrice = new Decimal(executedPrice);
-  } else if (executedPrice == null || executedPrice.isZero() || executedPrice.lte(0)) {
+  } else if (
+    executedPrice == null ||
+    executedPrice.isZero() ||
+    executedPrice.lte(0)
+  ) {
     executedPrice = new Decimal(currentPrice);
   }
-  
+
   const executedValue = executedPrice.mul(executedAmount);
   const executedAmountNum = toNum(executedAmount);
   const executedPriceNum = toNum(executedPrice);
@@ -1565,7 +1636,8 @@ async function executeSellShort(currentPrice, state, settings) {
   state.focusLastUpdated = new Date().toISOString();
   // Następny cel sprzedaży obliczamy dla następnego trendu (zwiększonego)
   // Jeśli trend osiągnął max, następny cel jest dla trendu 0 (cykl się powtarza)
-  const nextSellTrend = state.sellTrendCounter >= maxTrend ? 0 : state.sellTrendCounter;
+  const nextSellTrend =
+    state.sellTrendCounter >= maxTrend ? 0 : state.sellTrendCounter;
   state.nextSellTarget = calculateNextSellTarget(
     new Decimal(sellPriceNum),
     nextSellTrend,
@@ -1574,15 +1646,17 @@ async function executeSellShort(currentPrice, state, settings) {
 
   console.log(
     `🟡 SELL executed: position=${position.id} price=${sellPriceNum}, amount=${executedAmountNum}, ` +
-    `value=${executedValueNum}, trend=${currentTrend}→${state.sellTrendCounter} focus=${sellPriceNum}`,
+      `value=${executedValueNum}, trend=${currentTrend}→${state.sellTrendCounter} focus=${sellPriceNum}`,
   );
 
   // Oblicz szczegółowe źródło kwoty sprzedaży short - krok po kroku
   const sellTrendPercent = getTrendPercent(currentTrend, settings, false);
-  const sellMinValuePer1Percent = settings.sellConditions?.minValuePer1Percent || 200;
-  
+  const sellMinValuePer1Percent =
+    settings.sellConditions?.minValuePer1Percent || 200;
+
   // Krok 1: Oblicz podstawową wartość
-  const sellBaseValueStep1 = sellMinValuePer1Percent * sellTrendPercent.toNumber();
+  const sellBaseValueStep1 =
+    sellMinValuePer1Percent * sellTrendPercent.toNumber();
   let sellCalculationSteps = [
     {
       step: 1,
@@ -1591,10 +1665,10 @@ async function executeSellShort(currentPrice, state, settings) {
       values: {
         minValuePer1Percent: sellMinValuePer1Percent,
         trendPercent: sellTrendPercent.toNumber().toFixed(4),
-        result: sellBaseValueStep1.toFixed(2)
+        result: sellBaseValueStep1.toFixed(2),
       },
-      result: sellBaseValueStep1
-    }
+      result: sellBaseValueStep1,
+    },
   ];
 
   // Krok 2: Sprawdź faktyczny wzrost ceny
@@ -1602,10 +1676,15 @@ async function executeSellShort(currentPrice, state, settings) {
   try {
     const focus = new Decimal(state.currentFocusPrice || 0);
     if (!focus.isZero()) {
-      actualUpPercent = currentPrice.minus(focus).div(focus).mul(100).toDecimalPlaces(1, Decimal.ROUND_DOWN).toNumber();
+      actualUpPercent = currentPrice
+        .minus(focus)
+        .div(focus)
+        .mul(100)
+        .toDecimalPlaces(1, Decimal.ROUND_DOWN)
+        .toNumber();
     }
   } catch {}
-  
+
   sellCalculationSteps.push({
     step: 2,
     description: "Faktyczny wzrost ceny od focus",
@@ -1613,14 +1692,18 @@ async function executeSellShort(currentPrice, state, settings) {
     values: {
       focusPrice: (state.currentFocusPrice || 0).toFixed(2),
       currentPrice: currentPrice.toNumber().toFixed(2),
-      actualUpPercent: actualUpPercent != null ? actualUpPercent.toFixed(2) + "%" : "brak focus",
+      actualUpPercent:
+        actualUpPercent != null
+          ? actualUpPercent.toFixed(2) + "%"
+          : "brak focus",
       trendPercentFromSettings: sellTrendPercent.toNumber().toFixed(4) + "%",
       effectiveTrendPercent: effectiveTrendPercent.toNumber().toFixed(4) + "%",
-      note: actualUpPercent != null && actualUpPercent > sellTrendPercent.toNumber() 
-        ? "Użyto faktycznego wzrostu (większy niż trend z ustawień)" 
-        : "Użyto trendPercent z ustawień"
+      note:
+        actualUpPercent != null && actualUpPercent > sellTrendPercent.toNumber()
+          ? "Użyto faktycznego wzrostu (większy niż trend z ustawień)"
+          : "Użyto trendPercent z ustawień",
     },
-    result: effectiveTrendPercent.toNumber()
+    result: effectiveTrendPercent.toNumber(),
   });
 
   // Krok 3: Dodatkowe wartości z progów cenowych
@@ -1648,9 +1731,9 @@ async function executeSellShort(currentPrice, state, settings) {
         priceRange: `[${sellAdditionalThreshold?.minPrice ?? "-"}, ${sellAdditionalThreshold?.maxPrice ?? "-"}]`,
         additionalValue: sellAdditionalThreshold?.value || 0,
         trendPercent: sellTrendPercent.toNumber().toFixed(4),
-        result: sellAdditionalValueStep3.toFixed(2)
+        result: sellAdditionalValueStep3.toFixed(2),
       },
-      result: sellAdditionalValueStep3
+      result: sellAdditionalValueStep3,
     });
   }
 
@@ -1663,9 +1746,9 @@ async function executeSellShort(currentPrice, state, settings) {
     values: {
       baseValue: sellBaseValueStep1.toFixed(2),
       additionalValue: sellAdditionalValueStep3.toFixed(2),
-      result: sellValueBeforeMax.toFixed(2)
+      result: sellValueBeforeMax.toFixed(2),
     },
-    result: sellValueBeforeMax
+    result: sellValueBeforeMax,
   });
 
   // Krok 5: Ograniczenie maksymalnej wartości
@@ -1695,26 +1778,31 @@ async function executeSellShort(currentPrice, state, settings) {
         maxValue: sellMaxValueStep5.toFixed(2),
         priceRange: `[${sellMaxThreshold?.minPrice ?? "-"}, ${sellMaxThreshold?.maxPrice ?? "-"}]`,
         result: sellMaxValueStep5.toFixed(2),
-        note: "Wartość została ograniczona do maksimum"
+        note: "Wartość została ograniczona do maksimum",
       },
-      result: sellMaxValueStep5
+      result: sellMaxValueStep5,
     });
   }
 
   // Krok 6: Finalna obliczona wartość transakcji
-  const sellFinalCalculatedValue = sellMaxValueStep5 != null ? sellMaxValueStep5 : sellValueBeforeMax;
+  const sellFinalCalculatedValue =
+    sellMaxValueStep5 != null ? sellMaxValueStep5 : sellValueBeforeMax;
   sellCalculationSteps.push({
     step: sellCalculationSteps.length + 1,
     description: "Finalna obliczona wartość transakcji",
-    formula: sellMaxValueStep5 != null ? "wartośćPrzedMax ograniczona do maxValue" : "baseValue + additionalValue",
+    formula:
+      sellMaxValueStep5 != null
+        ? "wartośćPrzedMax ograniczona do maxValue"
+        : "baseValue + additionalValue",
     values: {
-      result: sellFinalCalculatedValue.toFixed(2)
+      result: sellFinalCalculatedValue.toFixed(2),
     },
-    result: sellFinalCalculatedValue
+    result: sellFinalCalculatedValue,
   });
 
   // Krok 7: Obliczona ilość (przed sprawdzeniem salda)
-  const sellCalculatedAmountBeforeBalance = sellFinalCalculatedValue / currentPrice.toNumber();
+  const sellCalculatedAmountBeforeBalance =
+    sellFinalCalculatedValue / currentPrice.toNumber();
   sellCalculationSteps.push({
     step: sellCalculationSteps.length + 1,
     description: "Obliczona ilość (przed sprawdzeniem salda)",
@@ -1722,13 +1810,15 @@ async function executeSellShort(currentPrice, state, settings) {
     values: {
       transactionValue: sellFinalCalculatedValue.toFixed(2),
       currentPrice: currentPrice.toNumber().toFixed(2),
-      result: sellCalculatedAmountBeforeBalance.toFixed(8)
+      result: sellCalculatedAmountBeforeBalance.toFixed(8),
     },
-    result: sellCalculatedAmountBeforeBalance
+    result: sellCalculatedAmountBeforeBalance,
   });
 
   // Krok 8: Sprawdzenie salda portfela
-  const amountWasAdjusted = amount.lt(new Decimal(sellCalculatedAmountBeforeBalance));
+  const amountWasAdjusted = amount.lt(
+    new Decimal(sellCalculatedAmountBeforeBalance),
+  );
   sellCalculationSteps.push({
     step: sellCalculationSteps.length + 1,
     description: "Sprawdzenie salda portfela",
@@ -1739,9 +1829,11 @@ async function executeSellShort(currentPrice, state, settings) {
       availableBalance: availableBalance.toNumber().toFixed(8),
       calculatedAmount: sellCalculatedAmountBeforeBalance.toFixed(8),
       finalAmount: amount.toNumber().toFixed(8),
-      adjusted: amountWasAdjusted ? "TAK - ilość przycięta do dostępnego salda" : "NIE - wystarczające saldo"
+      adjusted: amountWasAdjusted
+        ? "TAK - ilość przycięta do dostępnego salda"
+        : "NIE - wystarczające saldo",
     },
-    result: amount.toNumber()
+    result: amount.toNumber(),
   });
 
   // Krok 9: Zaktualizowana wartość po przycięciu ilości
@@ -1753,9 +1845,9 @@ async function executeSellShort(currentPrice, state, settings) {
     values: {
       finalAmount: amount.toNumber().toFixed(8),
       currentPrice: currentPrice.toNumber().toFixed(2),
-      result: sellFinalTransactionValue.toFixed(2)
+      result: sellFinalTransactionValue.toFixed(2),
     },
-    result: sellFinalTransactionValue
+    result: sellFinalTransactionValue,
   });
 
   // Krok 10: Rzeczywiste wartości z giełdy
@@ -1767,10 +1859,16 @@ async function executeSellShort(currentPrice, state, settings) {
       executedPrice: sellPriceNum.toFixed(2),
       executedAmount: executedAmountNum.toFixed(8),
       executedValue: executedValueNum.toFixed(2),
-      priceSource: exchangeResult.avgPrice ? "exchange (avgPrice)" : "currentPrice (fallback)",
-      amountSource: exchangeResult.executedQty ? "exchange (executedQty)" : (amountWasAdjusted ? "availableBalance" : "calculated")
+      priceSource: exchangeResult.avgPrice
+        ? "exchange (avgPrice)"
+        : "currentPrice (fallback)",
+      amountSource: exchangeResult.executedQty
+        ? "exchange (executedQty)"
+        : amountWasAdjusted
+          ? "availableBalance"
+          : "calculated",
     },
-    result: executedValueNum
+    result: executedValueNum,
   });
 
   const sellCalculationDetails = {
@@ -1782,9 +1880,9 @@ async function executeSellShort(currentPrice, state, settings) {
       executedValue: executedValueNum.toFixed(2),
       currentPrice: currentPrice.toNumber().toFixed(2),
       executedPrice: sellPriceNum.toFixed(2),
-      amountAdjusted: amountWasAdjusted
+      amountAdjusted: amountWasAdjusted,
     },
-    steps: sellCalculationSteps
+    steps: sellCalculationSteps,
   };
 
   // Loguj transakcję sprzedaży short do pliku JSON
@@ -1816,19 +1914,22 @@ async function checkAndExecuteSellBuybacks(currentPrice, state, settings) {
   // To zapewni, że wszystkie otwarte pozycje short są sprawdzane, nawet jeśli openSellPositionIds jest nieaktualne
   const allOpenPositions = await Position.findByWalletAndOrderId(
     state.walletAddress,
-    state.orderId
+    state.orderId,
   );
   const actualOpenSellPositions = allOpenPositions.filter(
-    (p) => p.type === PositionType.SELL && p.status === PositionStatus.OPEN
+    (p) => p.type === PositionType.SELL && p.status === PositionStatus.OPEN,
   );
-  
+
   // Zaktualizuj openSellPositionIds jeśli różni się od rzeczywistych otwartych pozycji short
   const actualOpenSellIds = actualOpenSellPositions.map((p) => p.id);
-  if (JSON.stringify(state.openSellPositionIds.sort()) !== JSON.stringify(actualOpenSellIds.sort())) {
+  if (
+    JSON.stringify(state.openSellPositionIds.sort()) !==
+    JSON.stringify(actualOpenSellIds.sort())
+  ) {
     if (DEBUG_CONDITIONS) {
       console.log(
         `🔍 BUYBACK syncing openSellPositionIds: was ${state.openSellPositionIds.length}, now ${actualOpenSellIds.length} ` +
-        `wallet=${state.walletAddress} order=${state.orderId}`
+          `wallet=${state.walletAddress} order=${state.orderId}`,
       );
     }
     state.openSellPositionIds = actualOpenSellIds;
@@ -1839,33 +1940,36 @@ async function checkAndExecuteSellBuybacks(currentPrice, state, settings) {
     if (DEBUG_CONDITIONS) {
       console.log(
         `🔍 BUYBACK skipped (no open positions) wallet=${state.walletAddress} order=${state.orderId} ` +
-        `openSellPositionIds=${JSON.stringify(state.openSellPositionIds)}`
+          `openSellPositionIds=${JSON.stringify(state.openSellPositionIds)}`,
       );
     }
     return false;
   }
 
   const positions = await Position.findByIds(state.openSellPositionIds);
-  
+
   if (DEBUG_CONDITIONS && positions.length > 0) {
     console.log(
       `🔍 BUYBACK checking ${positions.length} positions wallet=${state.walletAddress} order=${state.orderId} ` +
-      `currentPrice=${currentPrice.toNumber()} ` +
-      `openSellPositionIds=${JSON.stringify(state.openSellPositionIds)}`
+        `currentPrice=${currentPrice.toNumber()} ` +
+        `openSellPositionIds=${JSON.stringify(state.openSellPositionIds)}`,
     );
   }
 
   // Sortuj po cenie docelowej odkupu (najniższa pierwsza - najpierw odkup te z największym zyskiem)
-  positions.sort((a, b) => (a.targetBuybackPrice || Infinity) - (b.targetBuybackPrice || Infinity));
+  positions.sort(
+    (a, b) =>
+      (a.targetBuybackPrice || Infinity) - (b.targetBuybackPrice || Infinity),
+  );
 
   for (const position of positions) {
     if (position.status !== PositionStatus.OPEN) continue;
-    
+
     if (!position.targetBuybackPrice) {
       if (DEBUG_CONDITIONS) {
         console.log(
           `🔍 BUYBACK skipped (no target) wallet=${state.walletAddress} order=${state.orderId} ` +
-          `position=${position.id} - brak targetBuybackPrice`
+            `position=${position.id} - brak targetBuybackPrice`,
         );
       }
       continue;
@@ -1873,13 +1977,13 @@ async function checkAndExecuteSellBuybacks(currentPrice, state, settings) {
 
     const targetPrice = new Decimal(position.targetBuybackPrice);
     const priceReached = currentPrice.lte(targetPrice);
-    
+
     if (!priceReached) {
       if (DEBUG_CONDITIONS) {
         console.log(
           `🔍 BUYBACK skipped (target not reached) wallet=${state.walletAddress} order=${state.orderId} ` +
-          `position=${position.id} price=${currentPrice.toNumber()} ` +
-          `target=${targetPrice.toNumber()}`
+            `position=${position.id} price=${currentPrice.toNumber()} ` +
+            `target=${targetPrice.toNumber()}`,
         );
       }
       continue;
@@ -1887,10 +1991,13 @@ async function checkAndExecuteSellBuybacks(currentPrice, state, settings) {
 
     // Sprawdź minimalne wahanie (swing) - dla odkupu short sprawdzamy spadek od focus (currentFocusPrice)
     // lub od ceny sprzedaży jeśli focus nie jest dostępny
-    const swingReferencePrice = state.currentFocusPrice > 0 
-      ? new Decimal(state.currentFocusPrice)
-      : (position.sellPrice ? new Decimal(position.sellPrice) : null);
-    
+    const swingReferencePrice =
+      state.currentFocusPrice > 0
+        ? new Decimal(state.currentFocusPrice)
+        : position.sellPrice
+          ? new Decimal(position.sellPrice)
+          : null;
+
     if (swingReferencePrice) {
       const swingOk = meetsMinSwing(
         swingReferencePrice,
@@ -1904,8 +2011,8 @@ async function checkAndExecuteSellBuybacks(currentPrice, state, settings) {
         if (DEBUG_CONDITIONS) {
           console.log(
             `🔍 BUYBACK skipped (min swing) wallet=${state.walletAddress} order=${state.orderId} ` +
-            `position=${position.id} referencePrice=${swingReferencePrice.toNumber()} ` +
-            `currentPrice=${currentPrice.toNumber()} target=${targetPrice.toNumber()}`
+              `position=${position.id} referencePrice=${swingReferencePrice.toNumber()} ` +
+              `currentPrice=${currentPrice.toNumber()} target=${targetPrice.toNumber()}`,
           );
         }
         continue;
@@ -1915,29 +2022,35 @@ async function checkAndExecuteSellBuybacks(currentPrice, state, settings) {
     if (DEBUG_CONDITIONS) {
       console.log(
         `✅ BUYBACK executing wallet=${state.walletAddress} order=${state.orderId} ` +
-        `position=${position.id} price=${currentPrice.toNumber()} ` +
-        `target=${targetPrice.toNumber()}`
+          `position=${position.id} price=${currentPrice.toNumber()} ` +
+          `target=${targetPrice.toNumber()}`,
       );
     }
 
     // Przeładuj stan przed każdym odkupem, aby mieć aktualne dane
-    const currentState = await GridState.findByWalletAndOrderId(state.walletAddress, state.orderId);
+    const currentState = await GridState.findByWalletAndOrderId(
+      state.walletAddress,
+      state.orderId,
+    );
     if (currentState) {
       Object.assign(state, currentState.toJSON());
     }
 
     await executeSellBuyback(currentPrice, position, state, settings);
-    
+
     // Po odkupie przeładuj stan z bazy przed sprawdzeniem następnej pozycji
-    const updatedState = await GridState.findByWalletAndOrderId(state.walletAddress, state.orderId);
+    const updatedState = await GridState.findByWalletAndOrderId(
+      state.walletAddress,
+      state.orderId,
+    );
     if (updatedState) {
       Object.assign(state, updatedState.toJSON());
     }
-    
+
     // Kontynuuj sprawdzanie innych pozycji (nie przerywaj po pierwszym odkupie)
     // Wszystkie pozycje short które spełniają warunki będą odkupione w jednym cyklu
   }
-  
+
   return false; // Funkcja nie zwraca już boolean - wszystkie pozycje są sprawdzane
 }
 
@@ -1953,7 +2066,7 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
     if (DEBUG_CONDITIONS) {
       console.log(
         `🔍 BUYBACK skipped (negative profit) wallet=${state.walletAddress} order=${state.orderId} ` +
-        `position=${position.id} sellValue=${position.sellValue} buybackValue=${buybackValue.toNumber()} profit=${profit.toNumber()}`
+          `position=${position.id} sellValue=${position.sellValue} buybackValue=${buybackValue.toNumber()} profit=${profit.toNumber()}`,
       );
     }
     return;
@@ -1964,7 +2077,7 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
     if (DEBUG_CONDITIONS) {
       console.log(
         `🔍 BUYBACK skipped (minTransactionValue) wallet=${state.walletAddress} order=${state.orderId} ` +
-        `position=${position.id} buybackValue=${buybackValue.toNumber()} min=${settings.platform?.minTransactionValue}`
+          `position=${position.id} buybackValue=${buybackValue.toNumber()} min=${settings.platform?.minTransactionValue}`,
       );
     }
     return;
@@ -1976,7 +2089,7 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
     if (DEBUG_CONDITIONS) {
       console.log(
         `🔍 BUYBACK skipped (fee>=profit) wallet=${state.walletAddress} order=${state.orderId} ` +
-        `position=${position.id} buybackValue=${buybackValue.toNumber()} expectedProfit=${expectedProfit.toNumber()}`
+          `position=${position.id} buybackValue=${buybackValue.toNumber()} expectedProfit=${expectedProfit.toNumber()}`,
       );
     }
     return;
@@ -2007,20 +2120,24 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
   // Użyj rzeczywistej wykonanej ilości i średniej ceny z giełdy
   let executedAmount = exchangeResult.executedQty;
   let executedPrice = exchangeResult.avgPrice;
-  
+
   // Konwersja do Decimal jeśli potrzeba
   if (executedAmount != null && !(executedAmount instanceof Decimal)) {
     executedAmount = new Decimal(executedAmount);
   } else if (executedAmount == null || executedAmount.isZero()) {
     executedAmount = amount;
   }
-  
+
   if (executedPrice != null && !(executedPrice instanceof Decimal)) {
     executedPrice = new Decimal(executedPrice);
-  } else if (executedPrice == null || executedPrice.isZero() || executedPrice.lte(0)) {
+  } else if (
+    executedPrice == null ||
+    executedPrice.isZero() ||
+    executedPrice.lte(0)
+  ) {
     executedPrice = new Decimal(currentPrice);
   }
-  
+
   const executedBuybackValue = executedPrice.mul(executedAmount);
   // Profit brutto = różnica między wartością sprzedaży a wartością odkupu (w USDT)
   // Sprzedaliśmy za position.sellValue USDT, odkupiliśmy za executedBuybackValue USDT
@@ -2038,7 +2155,7 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
   const executedAmountNum = toNum(executedAmount);
   const executedBuybackValueNum = executedBuybackValue.toNumber();
   const executedProfitNum = executedProfit.toNumber();
-  
+
   position.buyPrice = buybackPriceNum;
   position.buyValue = executedBuybackValueNum;
   position.profit = executedProfitNum;
@@ -2072,8 +2189,8 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
 
   console.log(
     `🔵 BUYBACK executed: price=${buybackPriceNum}, amount=${executedAmountNum}, ` +
-    `sellValue=${position.sellValue}, buybackValue=${executedBuybackValueNum}, ` +
-    `profit=${executedProfitNum}, trend→${state.sellTrendCounter} focus=${buybackPriceNum}`,
+      `sellValue=${position.sellValue}, buybackValue=${executedBuybackValueNum}, ` +
+      `profit=${executedProfitNum}, trend→${state.sellTrendCounter} focus=${buybackPriceNum}`,
   );
 
   // Oblicz szczegółowe źródło kwoty odkupu short - krok po kroku
@@ -2085,9 +2202,9 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
       values: {
         sellPrice: position.sellPrice.toFixed(2),
         sellAmount: position.amount.toFixed(8),
-        sellValue: position.sellValue.toFixed(2)
+        sellValue: position.sellValue.toFixed(2),
       },
-      result: position.sellValue
+      result: position.sellValue,
     },
     {
       step: 2,
@@ -2095,9 +2212,9 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
       formula: "Cena pobrana z PriceFeedService",
       values: {
         currentPrice: currentPrice.toNumber().toFixed(2),
-        source: "PriceFeedService.getPrice()"
+        source: "PriceFeedService.getPrice()",
       },
-      result: currentPrice.toNumber()
+      result: currentPrice.toNumber(),
     },
     {
       step: 3,
@@ -2106,9 +2223,9 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
       values: {
         sellAmount: position.amount.toFixed(8),
         currentPrice: currentPrice.toNumber().toFixed(2),
-        calculatedBuybackValue: buybackValue.toNumber().toFixed(2)
+        calculatedBuybackValue: buybackValue.toNumber().toFixed(2),
       },
-      result: buybackValue.toNumber()
+      result: buybackValue.toNumber(),
     },
     {
       step: 4,
@@ -2118,10 +2235,14 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
         executedPrice: buybackPriceNum.toFixed(2),
         executedAmount: executedAmountNum.toFixed(8),
         executedBuybackValue: executedBuybackValueNum.toFixed(2),
-        priceSource: exchangeResult.avgPrice ? "exchange (avgPrice)" : "currentPrice (fallback)",
-        amountSource: exchangeResult.executedQty ? "exchange (executedQty)" : "position.amount (fallback)"
+        priceSource: exchangeResult.avgPrice
+          ? "exchange (avgPrice)"
+          : "currentPrice (fallback)",
+        amountSource: exchangeResult.executedQty
+          ? "exchange (executedQty)"
+          : "position.amount (fallback)",
       },
-      result: executedBuybackValueNum
+      result: executedBuybackValueNum,
     },
     {
       step: 5,
@@ -2131,11 +2252,12 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
         sellValue: position.sellValue.toFixed(2),
         executedBuybackValue: executedBuybackValueNum.toFixed(2),
         profit: executedProfitNum.toFixed(2),
-        profitPercent: ((executedProfitNum / position.sellValue) * 100).toFixed(2) + "%",
-        note: "Zysk = różnica między wartością sprzedaży a wartością odkupu"
+        profitPercent:
+          ((executedProfitNum / position.sellValue) * 100).toFixed(2) + "%",
+        note: "Zysk = różnica między wartością sprzedaży a wartością odkupu",
       },
-      result: executedProfitNum
-    }
+      result: executedProfitNum,
+    },
   ];
 
   const buybackCalculationDetails = {
@@ -2145,9 +2267,10 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
       executedPrice: buybackPriceNum.toFixed(2),
       executedBuybackValue: executedBuybackValueNum.toFixed(2),
       profit: executedProfitNum.toFixed(2),
-      profitPercent: ((executedProfitNum / position.sellValue) * 100).toFixed(2) + "%"
+      profitPercent:
+        ((executedProfitNum / position.sellValue) * 100).toFixed(2) + "%",
     },
-    steps: buybackCalculationSteps
+    steps: buybackCalculationSteps,
   };
 
   // Loguj zamknięcie pozycji short (odkup) do pliku JSON
@@ -2381,7 +2504,11 @@ export async function getGridState(walletAddress, orderId) {
  * Pobiera otwarte pozycje
  */
 export async function getOpenPositions(walletAddress, orderId) {
-  return await Position.findByWalletAndOrderId(walletAddress, orderId, PositionStatus.OPEN);
+  return await Position.findByWalletAndOrderId(
+    walletAddress,
+    orderId,
+    PositionStatus.OPEN,
+  );
 }
 
 /**
