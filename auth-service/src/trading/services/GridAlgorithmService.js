@@ -624,13 +624,21 @@ async function executeBuy(currentPrice, state, settings) {
     return;
   }
 
-  // Użyj rzeczywistej wykonanej ilości i średniej ceny z giełdy (jeśli dostępne)
-  const executedAmount = exchangeResult.executedQty || amount;
-  const executedPrice = exchangeResult.avgPrice || currentPrice;
+  // Użyj RZECZYWISTEJ wykonanej ilości i średniej ceny z giełdy
+  // (GridBot działa na realnych wartościach z giełdy, a nie na „planowanych” 5 USDT)
+  let executedAmount = exchangeResult.executedQty || amount;
+  let executedPrice = exchangeResult.avgPrice || currentPrice;
+
+  if (!(executedAmount instanceof Decimal)) {
+    executedAmount = new Decimal(executedAmount);
+  }
+  if (!(executedPrice instanceof Decimal)) {
+    executedPrice = new Decimal(executedPrice);
+  }
 
   let buyPriceNum = toNum(executedPrice);
   let amountNum = toNum(executedAmount);
-  const buyValueNum = toNum(transactionValue);
+  const buyValueNum = executedPrice.mul(executedAmount).toNumber();
 
   if (buyPriceNum <= 0 || amountNum <= 0) {
     console.warn(
@@ -1120,10 +1128,15 @@ async function executeBuySell(currentPrice, position, state, settings) {
   }
 
   const executedSellValue = executedPrice.mul(executedAmount);
-  // Profit = różnica między wartością sprzedaży a wartością zakupu (w USDT)
-  // Kupiliśmy za buyValue USDT, sprzedaliśmy za executedSellValue USDT
-  // Profit = sellValue - buyValue (różnica w USDT)
-  const executedProfit = executedSellValue.minus(position.buyValue);
+  // Profit brutto = różnica między wartością sprzedaży a wartością zakupu (w USDT)
+  // Kupiliśmy za position.buyValue USDT, sprzedaliśmy za executedSellValue USDT
+  const executedProfitGross = executedSellValue.minus(position.buyValue);
+  // Przybliżona prowizja: fee od zakupu + fee od sprzedaży (0.1% na każdą stronę)
+  const totalFeeLong = new Decimal(position.buyValue || 0)
+    .plus(executedSellValue)
+    .mul(DEFAULT_FEE_PERCENT)
+    .div(100);
+  const executedProfit = executedProfitGross.minus(totalFeeLong);
   const sellPriceNum = toNum(executedPrice);
   const executedAmountNum = toNum(executedAmount);
   const executedSellValueNum = executedSellValue.toNumber();
@@ -1998,12 +2011,17 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
   }
   
   const executedBuybackValue = executedPrice.mul(executedAmount);
-  // Profit = różnica między wartością sprzedaży a wartością odkupu (w USDT)
-  // Sprzedaliśmy za sellValue USDT, odkupiliśmy za executedBuybackValue USDT
-  // Profit = sellValue - buybackValue (różnica w USDT)
-  const executedProfit = new Decimal(position.sellValue).minus(
+  // Profit brutto = różnica między wartością sprzedaży a wartością odkupu (w USDT)
+  // Sprzedaliśmy za position.sellValue USDT, odkupiliśmy za executedBuybackValue USDT
+  const executedProfitGross = new Decimal(position.sellValue).minus(
     executedBuybackValue,
   );
+  // Przybliżona prowizja: fee od sprzedaży + fee od odkupu (0.1% na każdą stronę)
+  const totalFeeShort = new Decimal(position.sellValue || 0)
+    .plus(executedBuybackValue)
+    .mul(DEFAULT_FEE_PERCENT)
+    .div(100);
+  const executedProfit = executedProfitGross.minus(totalFeeShort);
 
   const buybackPriceNum = toNum(executedPrice);
   const executedAmountNum = toNum(executedAmount);
