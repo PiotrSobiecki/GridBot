@@ -688,7 +688,7 @@ async function executeBuy(currentPrice, state, settings) {
   }
 
   console.log(
-    `🟢 BUY executed: price=${buyPriceNum}, amount=${amountNum}, value=${transactionValue}, trend=${currentTrend}→${state.buyTrendCounter} focus=${buyPriceNum}`,
+    `🟢 BUY executed: position=${position.id} price=${buyPriceNum}, amount=${amountNum}, value=${transactionValue}, trend=${currentTrend}→${state.buyTrendCounter} focus=${buyPriceNum}`,
   );
 
   // Oblicz szczegółowe źródło kwoty zakupu - krok po kroku
@@ -1151,7 +1151,7 @@ async function executeBuySell(currentPrice, position, state, settings) {
   state.nextBuyTarget = nextBuyTargetForDisplay;
 
   console.log(
-    `🔴 SELL executed: price=${finalSellPrice}, amount=${executedAmountNum}, ` +
+    `🔴 SELL executed: position=${position.id} price=${finalSellPrice}, amount=${executedAmountNum}, ` +
     `buyValue=${position.buyValue}, sellValue=${executedSellValueNum}, ` +
     `profit=${executedProfitNum}, trend→${state.buyTrendCounter} focus=${finalSellPrice}`,
   );
@@ -1526,7 +1526,7 @@ async function executeSellShort(currentPrice, state, settings) {
   ).toNumber();
 
   console.log(
-    `🟡 SELL executed: price=${sellPriceNum}, amount=${executedAmountNum}, ` +
+    `🟡 SELL executed: position=${position.id} price=${sellPriceNum}, amount=${executedAmountNum}, ` +
     `value=${executedValueNum}, trend=${currentTrend}→${state.sellTrendCounter} focus=${sellPriceNum}`,
   );
 
