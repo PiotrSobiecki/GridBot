@@ -9,6 +9,7 @@ import {
   Trash2,
   AlertTriangle,
 } from "lucide-react";
+import toast from "react-hot-toast";
 import { useStore } from "../store/useStore";
 import { api } from "../api";
 import type { Position } from "../types";
@@ -223,6 +224,9 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
             <thead>
               <tr className="text-xs text-gray-500 border-b border-grid-border">
                 <th className="text-left p-2 sm:p-3 font-medium">Data</th>
+                <th className="text-left p-2 sm:p-3 font-medium hidden lg:table-cell">
+                  ID pozycji
+                </th>
                 <th className="text-right p-2 sm:p-3 font-medium">
                   {activeTab === "buy" ? "Cena zakupu" : "Cena sprzedaży"}
                 </th>
@@ -293,6 +297,30 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                           },
                         )}
                       </span>
+                    </td>
+                    <td className="p-2 sm:p-3 text-xs sm:text-sm text-gray-500 hidden lg:table-cell">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono">
+                          {position.id.slice(0, 8)}…
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (navigator?.clipboard?.writeText) {
+                              navigator.clipboard
+                                .writeText(position.id)
+                                .then(() => {
+                                  toast.success("Skopiowano ID pozycji");
+                                })
+                                .catch(() => {});
+                            }
+                          }}
+                          className="px-1.5 py-0.5 text-[10px] border border-grid-border rounded hover:border-emerald-500 hover:text-emerald-400 transition-colors"
+                          title="Kopiuj pełne ID pozycji"
+                        >
+                          Kopiuj
+                        </button>
+                      </div>
                     </td>
                     <td className="p-2 sm:p-3 text-right font-mono text-xs sm:text-sm">
                       {formatPrice(entryPrice)}
