@@ -14,10 +14,6 @@ const __dirname = path.dirname(__filename);
 const DEBUG_CONDITIONS_ENV = String(
   process.env.GRID_DEBUG_CONDITIONS || "",
 ).trim();
-console.log(
-  "GRID_DEBUG_CONDITIONS raw from env:",
-  JSON.stringify(DEBUG_CONDITIONS_ENV || null),
-);
 
 // W DEV włączamy logowanie domyślnie (jeśli zmienna nie jest ustawiona na '0').
 // Dzięki temu nie blokujemy się na problemach z .env.
@@ -25,10 +21,24 @@ const DEBUG_CONDITIONS =
   DEBUG_CONDITIONS_ENV === "1" ||
   (DEBUG_CONDITIONS_ENV === "" && process.env.NODE_ENV !== "production");
 
-if (DEBUG_CONDITIONS) {
-  console.log("✅ Logowanie warunków BUY/SELL jest WŁĄCZONE");
-} else {
-  console.log("ℹ️ Logowanie warunków BUY/SELL jest WYŁĄCZONE");
+// "Ciche" logi produkcyjne – przy tym ustawieniu zostawiamy
+// tylko błędy z API / ważne ostrzeżenia oraz udane transakcje.
+const QUIET_PRODUCTION_LOGS =
+  process.env.NODE_ENV === "production" && DEBUG_CONDITIONS_ENV !== "1";
+
+// Te logi są przydatne głównie w DEV – w produkcji je wyłączamy,
+// żeby nie zaśmiecać logów przy QUIET_PRODUCTION_LOGS.
+if (!QUIET_PRODUCTION_LOGS) {
+  console.log(
+    "GRID_DEBUG_CONDITIONS raw from env:",
+    JSON.stringify(DEBUG_CONDITIONS_ENV || null),
+  );
+
+  if (DEBUG_CONDITIONS) {
+    console.log("✅ Logowanie warunków BUY/SELL jest WŁĄCZONE");
+  } else {
+    console.log("ℹ️ Logowanie warunków BUY/SELL jest WYŁĄCZONE");
+  }
 }
 
 /**
@@ -312,7 +322,7 @@ async function checkAndUpdateFocusTime(state, currentPrice, settings) {
 /**
  * #2 Sprawdza czy można wykonać zakup (walidacja portfela)
  */
-async function canExecuteBuy(transactionValue, state, settings) {
+async function canExecuteBuy(transactionValue, currentPrice, state, settings) {
   const buySettings = settings.buy;
   if (!buySettings) return true;
 
@@ -327,10 +337,16 @@ async function canExecuteBuy(transactionValue, state, settings) {
   const walletProtection = new Decimal(buySettings.walletProtection || 0);
   const availableBalance = walletBalance.minus(walletProtection);
 
+  // Pomocnicze dane o parze/krypto do logów
+  const baseAsset = settings.baseAsset || settings.sell?.currency || "BTC";
+  const quoteAsset = settings.quoteAsset || currency;
+  const symbol = `${baseAsset}${quoteAsset}`;
+
   if (availableBalance.lt(transactionValue)) {
     if (DEBUG_CONDITIONS) {
       console.log(
         `🔍 BUY skipped (wallet.balance) wallet=${state.walletAddress} order=${state.orderId} ` +
+          `symbol=${symbol} base=${baseAsset} quote=${quoteAsset} price=${currentPrice?.toString?.() ?? currentPrice ?? "-"} ` +
           `currency=${currency} balance=${walletBalance.toString()} protection=${walletProtection.toString()} ` +
           `available=${availableBalance.toString()} txValue=${transactionValue.toString()}`,
       );
@@ -355,6 +371,7 @@ async function canExecuteBuy(transactionValue, state, settings) {
         if (DEBUG_CONDITIONS) {
           console.log(
             `🔍 BUY skipped (wallet.onlySold) wallet=${state.walletAddress} order=${state.orderId} ` +
+              `symbol=${symbol} base=${baseAsset} quote=${quoteAsset} price=${currentPrice?.toString?.() ?? currentPrice ?? "-"} ` +
               `soldValue=${soldValue.toString()} boughtValue=${boughtValue.toString()} ` +
               `totalProfit=${(state.totalProfit || 0).toString()} addProfit=${addProfit} ` +
               `allowedToBuy=${allowedToBuy.toString()} txValue=${transactionValue.toString()}`,
@@ -373,6 +390,7 @@ async function canExecuteBuy(transactionValue, state, settings) {
         if (DEBUG_CONDITIONS) {
           console.log(
             `🔍 BUY skipped (wallet.maxDefined) wallet=${state.walletAddress} order=${state.orderId} ` +
+              `symbol=${symbol} base=${baseAsset} quote=${quoteAsset} price=${currentPrice?.toString?.() ?? currentPrice ?? "-"} ` +
               `totalBought=${totalBought.toString()} maxValue=${maxValue.toString()} ` +
               `effectiveMax=${effectiveMax.toString()} addProfit=${addProfit} ` +
               `txValue=${transactionValue.toString()}`,
@@ -607,7 +625,7 @@ async function executeBuy(currentPrice, state, settings) {
 
   // #2 Sprawdź portfel
   // Szczegółowe logi powodów (saldo / onlySold / maxDefined) są w canExecuteBuy
-  if (!(await canExecuteBuy(transactionValue, state, settings))) {
+  if (!(await canExecuteBuy(transactionValue, currentPrice, state, settings))) {
     return;
   }
 
@@ -725,7 +743,7 @@ async function executeBuy(currentPrice, state, settings) {
     settings,
   ).toNumber();
 
-  if (DEBUG_CONDITIONS) {
+  if (DEBUG_CONDITIONS && !QUIET_PRODUCTION_LOGS) {
     const trendPercent = getTrendPercent(nextTrend, settings, true);
     console.log(
       `🔍 BUY focus updated: price=${buyPriceNum}, trend=${currentTrend}→${state.buyTrendCounter}, ` +
@@ -734,9 +752,11 @@ async function executeBuy(currentPrice, state, settings) {
     );
   }
 
-  console.log(
-    `🟢 BUY executed: position=${position.id} price=${buyPriceNum}, amount=${amountNum}, value=${transactionValue}, trend=${currentTrend}→${state.buyTrendCounter} focus=${buyPriceNum}`,
-  );
+  if (!QUIET_PRODUCTION_LOGS) {
+    console.log(
+      `🟢 BUY executed: position=${position.id} price=${buyPriceNum}, amount=${amountNum}, value=${transactionValue}, trend=${currentTrend}→${state.buyTrendCounter} focus=${buyPriceNum}`,
+    );
+  }
 
   // Oblicz szczegółowe źródło kwoty zakupu - krok po kroku
   const trendPercent = getTrendPercent(currentTrend, settings, true);
@@ -1256,11 +1276,13 @@ async function executeBuySell(currentPrice, position, state, settings) {
   state.focusLastUpdated = new Date().toISOString();
   state.nextBuyTarget = nextBuyTargetForDisplay;
 
-  console.log(
-    `🔴 SELL executed: position=${position.id} price=${finalSellPrice}, amount=${executedAmountNum}, ` +
-      `buyValue=${position.buyValue}, sellValue=${executedSellValueNum}, ` +
-      `profit=${executedProfitNum}, trend→${state.buyTrendCounter} focus=${finalSellPrice}`,
-  );
+  if (!QUIET_PRODUCTION_LOGS) {
+    console.log(
+      `🔴 SELL executed: position=${position.id} price=${finalSellPrice}, amount=${executedAmountNum}, ` +
+        `buyValue=${position.buyValue}, sellValue=${executedSellValueNum}, ` +
+        `profit=${executedProfitNum}, trend→${state.buyTrendCounter} focus=${finalSellPrice}`,
+    );
+  }
 
   // Oblicz szczegółowe źródło kwoty sprzedaży - krok po kroku
   const sellCalculationSteps = [
@@ -1644,10 +1666,12 @@ async function executeSellShort(currentPrice, state, settings) {
     settings,
   ).toNumber();
 
-  console.log(
-    `🟡 SELL executed: position=${position.id} price=${sellPriceNum}, amount=${executedAmountNum}, ` +
-      `value=${executedValueNum}, trend=${currentTrend}→${state.sellTrendCounter} focus=${sellPriceNum}`,
-  );
+  if (!QUIET_PRODUCTION_LOGS) {
+    console.log(
+      `🟡 SELL executed: position=${position.id} price=${sellPriceNum}, amount=${executedAmountNum}, ` +
+        `value=${executedValueNum}, trend=${currentTrend}→${state.sellTrendCounter} focus=${sellPriceNum}`,
+    );
+  }
 
   // Oblicz szczegółowe źródło kwoty sprzedaży short - krok po kroku
   const sellTrendPercent = getTrendPercent(currentTrend, settings, false);
@@ -2187,11 +2211,13 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
     settings,
   ).toNumber();
 
-  console.log(
-    `🔵 BUYBACK executed: price=${buybackPriceNum}, amount=${executedAmountNum}, ` +
-      `sellValue=${position.sellValue}, buybackValue=${executedBuybackValueNum}, ` +
-      `profit=${executedProfitNum}, trend→${state.sellTrendCounter} focus=${buybackPriceNum}`,
-  );
+  if (!QUIET_PRODUCTION_LOGS) {
+    console.log(
+      `🔵 BUYBACK executed: price=${buybackPriceNum}, amount=${executedAmountNum}, ` +
+        `sellValue=${position.sellValue}, buybackValue=${executedBuybackValueNum}, ` +
+        `profit=${executedProfitNum}, trend→${state.sellTrendCounter} focus=${buybackPriceNum}`,
+    );
+  }
 
   // Oblicz szczegółowe źródło kwoty odkupu short - krok po kroku
   const buybackCalculationSteps = [
