@@ -305,6 +305,13 @@ async function canExecuteBuy(transactionValue, state, settings) {
   const availableBalance = walletBalance.minus(walletProtection);
 
   if (availableBalance.lt(transactionValue)) {
+    if (DEBUG_CONDITIONS) {
+      console.log(
+        `🔍 BUY skipped (wallet.balance) wallet=${state.walletAddress} order=${state.orderId} ` +
+          `currency=${currency} balance=${walletBalance.toString()} protection=${walletProtection.toString()} ` +
+          `available=${availableBalance.toString()} txValue=${transactionValue.toString()}`,
+      );
+    }
     return false;
   }
 
@@ -321,7 +328,17 @@ async function canExecuteBuy(transactionValue, state, settings) {
       const boughtValue = new Decimal(state.totalBoughtValue || 0);
       let allowedToBuy = soldValue.minus(boughtValue);
       if (addProfit) allowedToBuy = allowedToBuy.plus(state.totalProfit || 0);
-      if (transactionValue.gt(allowedToBuy)) return false;
+      if (transactionValue.gt(allowedToBuy)) {
+        if (DEBUG_CONDITIONS) {
+          console.log(
+            `🔍 BUY skipped (wallet.onlySold) wallet=${state.walletAddress} order=${state.orderId} ` +
+              `soldValue=${soldValue.toString()} boughtValue=${boughtValue.toString()} ` +
+              `totalProfit=${(state.totalProfit || 0).toString()} addProfit=${addProfit} ` +
+              `allowedToBuy=${allowedToBuy.toString()} txValue=${transactionValue.toString()}`,
+          );
+        }
+        return false;
+      }
       break;
     }
     case "maxDefined": {
@@ -329,7 +346,17 @@ async function canExecuteBuy(transactionValue, state, settings) {
       const totalBought = new Decimal(state.totalBoughtValue || 0);
       let effectiveMax = maxValue;
       if (addProfit) effectiveMax = effectiveMax.plus(state.totalProfit || 0);
-      if (totalBought.plus(transactionValue).gt(effectiveMax)) return false;
+      if (totalBought.plus(transactionValue).gt(effectiveMax)) {
+        if (DEBUG_CONDITIONS) {
+          console.log(
+            `🔍 BUY skipped (wallet.maxDefined) wallet=${state.walletAddress} order=${state.orderId} ` +
+              `totalBought=${totalBought.toString()} maxValue=${maxValue.toString()} ` +
+              `effectiveMax=${effectiveMax.toString()} addProfit=${addProfit} ` +
+              `txValue=${transactionValue.toString()}`,
+          );
+        }
+        return false;
+      }
       break;
     }
     // 'walletLimit' - limit portfela, już sprawdzony przez availableBalance
@@ -552,24 +579,8 @@ async function executeBuy(currentPrice, state, settings) {
   }
 
   // #2 Sprawdź portfel
+  // Szczegółowe logi powodów (saldo / onlySold / maxDefined) są w canExecuteBuy
   if (!(await canExecuteBuy(transactionValue, state, settings))) {
-    if (DEBUG_CONDITIONS) {
-      const buySettings = settings.buy || {};
-      const currency = buySettings.currency || "USDT";
-      const exchange = settings.exchange || "asterdex";
-      const walletBalance = await WalletService.getBalance(
-        state.walletAddress,
-        currency,
-        exchange,
-      );
-      const walletProtection = new Decimal(buySettings.walletProtection || 0);
-      const availableBalance = walletBalance.minus(walletProtection);
-      console.log(
-        `🔍 BUY skipped (wallet) wallet=${state.walletAddress} order=${state.orderId} ` +
-          `currency=${currency} balance=${walletBalance.toString()} protection=${walletProtection.toString()} ` +
-          `available=${availableBalance.toString()} txValue=${transactionValue.toNumber()}`,
-      );
-    }
     return;
   }
 
