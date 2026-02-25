@@ -754,7 +754,7 @@ async function executeBuy(currentPrice, state, settings) {
 
   if (!QUIET_PRODUCTION_LOGS) {
     console.log(
-      `🟢 BUY executed: position=${position.id} price=${buyPriceNum}, amount=${amountNum}, value=${transactionValue}, trend=${currentTrend}→${state.buyTrendCounter} focus=${buyPriceNum}`,
+      `🟢 BUY executed: position=${position.id} order=${state.orderId} price=${buyPriceNum}, amount=${amountNum}, value=${transactionValue}, trend=${currentTrend}→${state.buyTrendCounter} focus=${buyPriceNum}`,
     );
   }
 
