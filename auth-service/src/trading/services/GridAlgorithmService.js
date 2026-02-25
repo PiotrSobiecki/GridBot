@@ -1015,7 +1015,15 @@ async function checkAndExecuteBuySells(currentPrice, state, settings) {
         Object.assign(state, currentState.toJSON());
       }
       
-      await executeBuySell(currentPrice, position, state, settings);
+      try {
+        await executeBuySell(currentPrice, position, state, settings);
+      } catch (e) {
+        console.error(
+          `❌ BUY_SELL error for position=${position.id} wallet=${state.walletAddress} order=${state.orderId}:`,
+          e?.message || e,
+        );
+        continue;
+      }
       executed = true;
       executedCount++;
       
@@ -1050,12 +1058,27 @@ async function checkAndExecuteBuySells(currentPrice, state, settings) {
  * Wykonuje sprzedaż pozycji kupna
  */
 async function executeBuySell(currentPrice, position, state, settings) {
+  if (DEBUG_CONDITIONS) {
+    console.log(
+      `🔍 executeBuySell start position=${position.id} wallet=${state.walletAddress} order=${state.orderId} ` +
+        `currentPrice=${currentPrice.toNumber()} buyPrice=${position.buyPrice} buyValue=${position.buyValue}`,
+    );
+  }
+
   const amount = new Decimal(position.amount);
   const sellValue = amount.mul(currentPrice);
   const profit = sellValue.minus(position.buyValue);
 
   // Nigdy nie sprzedawaj ze stratą
-  if (profit.lt(0)) return;
+  if (profit.lt(0)) {
+    if (DEBUG_CONDITIONS) {
+      console.log(
+        `🔍 SELL skipped (profit<0) position=${position.id} wallet=${state.walletAddress} order=${state.orderId} ` +
+          `sellValue=${sellValue.toNumber()} buyValue=${position.buyValue} profit=${profit.toNumber()}`,
+      );
+    }
+    return;
+  }
 
   const baseAsset = settings.baseAsset || settings.sell?.currency || "BTC";
   const quoteAsset = settings.quoteAsset || settings.buy?.currency || "USDT";
@@ -1074,7 +1097,7 @@ async function executeBuySell(currentPrice, position, state, settings) {
 
   if (!exchangeResult.success) {
     console.error(
-      `Failed to execute sell on exchange: ${exchangeResult.error}`,
+      `Failed to execute sell on exchange for position=${position.id}: ${exchangeResult.error}`,
     );
     return;
   }
