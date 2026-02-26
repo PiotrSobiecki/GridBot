@@ -735,13 +735,58 @@ async function executeBuy(currentPrice, state, settings) {
   }
 
   // Oblicz wartość transakcji na podstawie "efektywnego" procenta
-  const transactionValue = calculateTransactionValue(
+  let transactionValue = calculateTransactionValue(
     currentPrice,
     currentTrend,
     settings,
     true,
     effectiveTrendPercent,
   );
+
+  // Jeśli tryb kupna to "maxDefined", to zamiast całkowicie blokować transakcję,
+  // przytnij jej wartość do "wolnego miejsca" w limicie.
+  const buySettings = settings.buy || {};
+  if (buySettings.mode === "maxDefined") {
+    const maxValue = new Decimal(buySettings.maxValue || 0);
+    if (maxValue.gt(0)) {
+      const addProfit = buySettings.addProfit === true;
+      let effectiveMax = maxValue;
+      if (addProfit) effectiveMax = effectiveMax.plus(state.totalProfit || 0);
+
+      const openBoughtValue = await getOpenLongBuyValue(state);
+      const remaining = effectiveMax.minus(openBoughtValue);
+
+      // Limit całkowicie wypełniony – nic nie kupuj.
+      if (remaining.lte(0)) {
+        if (DEBUG_CONDITIONS) {
+          console.log(
+            `🔍 BUY skipped (wallet.maxDefined.filled) wallet=${state.walletAddress} order=${state.orderId} ` +
+              `totalBoughtOpen=${openBoughtValue.toString()} maxValue=${maxValue.toString()} ` +
+              `effectiveMax=${effectiveMax.toString()} addProfit=${addProfit}`,
+          );
+        }
+        return;
+      }
+
+      // Jeśli wyliczone txValue przekracza wolne miejsce, kup tylko do limitu.
+      if (transactionValue.gt(remaining)) {
+        const originalTx = transactionValue;
+        transactionValue = remaining.toDecimalPlaces(
+          PRICE_SCALE,
+          Decimal.ROUND_DOWN,
+        );
+
+        if (DEBUG_CONDITIONS) {
+          console.log(
+            `🔍 BUY maxDefined capped txValue wallet=${state.walletAddress} order=${state.orderId} ` +
+              `totalBoughtOpen=${openBoughtValue.toString()} maxValue=${maxValue.toString()} ` +
+              `effectiveMax=${effectiveMax.toString()} addProfit=${addProfit} ` +
+              `txOriginal=${originalTx.toString()} txCapped=${transactionValue.toString()}`,
+          );
+        }
+      }
+    }
+  }
 
   // #3 Sprawdź min wartość
   if (!meetsMinTransactionValue(transactionValue, settings)) {
@@ -1630,7 +1675,52 @@ async function executeSellShort(currentPrice, state, settings) {
     effectiveTrendPercent,
   );
 
-  // Ilość wynikająca z logiki wartości transakcji
+  // Jeśli tryb sprzedaży to "maxDefined", to zamiast całkowicie blokować transakcję,
+  // przytnij jej wartość do "wolnego miejsca" w limicie.
+  const sellSettings = settings.sell || {};
+  if (sellSettings.mode === "maxDefined") {
+    const maxValue = new Decimal(sellSettings.maxValue || 0);
+    if (maxValue.gt(0)) {
+      const addProfit = sellSettings.addProfit === true;
+      let effectiveMax = maxValue;
+      if (addProfit) effectiveMax = effectiveMax.plus(state.totalProfit || 0);
+
+      const openShortValue = await getOpenShortSellValue(state);
+      const remaining = effectiveMax.minus(openShortValue);
+
+      // Limit całkowicie wypełniony – nic nie sprzedawaj.
+      if (remaining.lte(0)) {
+        if (DEBUG_CONDITIONS) {
+          console.log(
+            `🔍 SELL skipped (wallet.maxDefined.filled) wallet=${state.walletAddress} order=${state.orderId} ` +
+              `totalSoldOpen=${openShortValue.toString()} maxValue=${maxValue.toString()} ` +
+              `effectiveMax=${effectiveMax.toString()} addProfit=${addProfit}`,
+          );
+        }
+        return;
+      }
+
+      // Jeśli wyliczone txValue przekracza wolne miejsce, sprzedaj tylko do limitu.
+      if (transactionValue.gt(remaining)) {
+        const originalTx = transactionValue;
+        transactionValue = remaining.toDecimalPlaces(
+          PRICE_SCALE,
+          Decimal.ROUND_DOWN,
+        );
+
+        if (DEBUG_CONDITIONS) {
+          console.log(
+            `🔍 SELL maxDefined capped txValue wallet=${state.walletAddress} order=${state.orderId} ` +
+              `totalSoldOpen=${openShortValue.toString()} maxValue=${maxValue.toString()} ` +
+              `effectiveMax=${effectiveMax.toString()} addProfit=${addProfit} ` +
+              `txOriginal=${originalTx.toString()} txCapped=${transactionValue.toString()}`,
+          );
+        }
+      }
+    }
+  }
+
+  // Ilość wynikająca z (ewentualnie przyciętej) wartości transakcji
   let amount = transactionValue
     .div(currentPrice)
     .toDecimalPlaces(AMOUNT_SCALE, Decimal.ROUND_DOWN);
@@ -1638,7 +1728,6 @@ async function executeSellShort(currentPrice, state, settings) {
   // Sprawdź realne saldo BTC i w razie potrzeby przytnij ilość do dostępnego balansu.
   // Dzięki temu przy małym saldzie (i ustawionym 0 w polu "Max wartość")
   // bot sprzeda "ile ma", zamiast w ogóle nie wykonywać transakcji.
-  const sellSettings = settings.sell || {};
   const sellCurrency = sellSettings.currency || "BTC";
   const exchange = settings.exchange || "asterdex";
   const walletBalance = await WalletService.getBalance(
