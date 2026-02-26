@@ -409,7 +409,7 @@ async function canExecuteBuy(transactionValue, currentPrice, state, settings) {
 /**
  * #2 Sprawdza czy można wykonać sprzedaż (walidacja portfela)
  */
-async function canExecuteSell(amount, state, settings) {
+async function canExecuteSell(amount, currentPrice, state, settings) {
   const sellSettings = settings.sell;
   if (!sellSettings) return true;
 
@@ -423,7 +423,75 @@ async function canExecuteSell(amount, state, settings) {
   const walletProtection = new Decimal(sellSettings.walletProtection || 0);
   const availableBalance = walletBalance.minus(walletProtection);
 
-  return availableBalance.gte(amount);
+  if (availableBalance.lt(amount)) {
+    if (DEBUG_CONDITIONS) {
+      console.log(
+        `🔍 SELL skipped (wallet.balance) wallet=${state.walletAddress} order=${state.orderId} ` +
+          `currency=${currency} balance=${walletBalance.toString()} protection=${walletProtection.toString()} ` +
+          `available=${availableBalance.toString()} amount=${amount.toString()}`,
+      );
+    }
+    return false;
+  }
+
+  const mode = sellSettings.mode;
+  if (!mode) return true;
+
+  const maxValue = new Decimal(sellSettings.maxValue || 0);
+  const addProfit = sellSettings.addProfit === true;
+
+  // Pomocnicze dane o parze do logów
+  const baseAsset = settings.baseAsset || sellSettings.currency || "BTC";
+  const quoteAsset = settings.quoteAsset || settings.buy?.currency || "USDT";
+  const symbol = `${baseAsset}${quoteAsset}`;
+  const txValue = currentPrice
+    ? amount.mul(new Decimal(currentPrice)).toDecimalPlaces(PRICE_SCALE, Decimal.ROUND_DOWN)
+    : new Decimal(0);
+
+  switch (mode) {
+    case "onlySold": {
+      // Może sprzedać tylko tyle ile wcześniej kupiło
+      const soldValue = new Decimal(state.totalSoldValue || 0);
+      const boughtValue = new Decimal(state.totalBoughtValue || 0);
+      let allowedToSell = boughtValue.minus(soldValue);
+      if (addProfit) allowedToSell = allowedToSell.plus(state.totalProfit || 0);
+      if (txValue.gt(allowedToSell)) {
+        if (DEBUG_CONDITIONS) {
+          console.log(
+            `🔍 SELL skipped (wallet.onlySold) wallet=${state.walletAddress} order=${state.orderId} ` +
+              `symbol=${symbol} base=${baseAsset} quote=${quoteAsset} price=${currentPrice?.toString?.() ?? "-"} ` +
+              `boughtValue=${boughtValue.toString()} soldValue=${soldValue.toString()} ` +
+              `totalProfit=${(state.totalProfit || 0).toString()} addProfit=${addProfit} ` +
+              `allowedToSell=${allowedToSell.toString()} txValue=${txValue.toString()}`,
+          );
+        }
+        return false;
+      }
+      break;
+    }
+    case "maxDefined": {
+      // Sprzedaje do określonego maksimum
+      const totalSold = new Decimal(state.totalSoldValue || 0);
+      let effectiveMax = maxValue;
+      if (addProfit) effectiveMax = effectiveMax.plus(state.totalProfit || 0);
+      if (maxValue.gt(0) && totalSold.plus(txValue).gt(effectiveMax)) {
+        if (DEBUG_CONDITIONS) {
+          console.log(
+            `🔍 SELL skipped (wallet.maxDefined) wallet=${state.walletAddress} order=${state.orderId} ` +
+              `symbol=${symbol} base=${baseAsset} quote=${quoteAsset} price=${currentPrice?.toString?.() ?? "-"} ` +
+              `totalSold=${totalSold.toString()} maxValue=${maxValue.toString()} ` +
+              `effectiveMax=${effectiveMax.toString()} addProfit=${addProfit} ` +
+              `txValue=${txValue.toString()}`,
+          );
+        }
+        return false;
+      }
+      break;
+    }
+    // 'walletLimit' - limit portfela, już sprawdzony przez availableBalance
+  }
+
+  return true;
 }
 
 /**
@@ -1533,13 +1601,7 @@ async function executeSellShort(currentPrice, state, settings) {
     amount = availableBalance.toDecimalPlaces(AMOUNT_SCALE, Decimal.ROUND_DOWN);
   }
 
-  if (!(await canExecuteSell(amount, state, settings))) {
-    if (DEBUG_CONDITIONS) {
-      console.log(
-        `🔍 SELL skipped (canExecuteSell=false) wallet=${state.walletAddress} ` +
-          `amount=${amount.toString()} available=${availableBalance.toString()}`,
-      );
-    }
+  if (!(await canExecuteSell(amount, currentPrice, state, settings))) {
     return;
   }
 
