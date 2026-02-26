@@ -383,15 +383,17 @@ async function canExecuteBuy(transactionValue, currentPrice, state, settings) {
     }
     case "maxDefined": {
       // Kupuje do określonego maksimum
-      const totalBought = new Decimal(state.totalBoughtValue || 0);
+      // Używamy TYLKO łącznej wartości OTWARTYCH pozycji long (BUY),
+      // żeby zamknięte pozycje "zwalniały" limit.
+      const openBoughtValue = await getOpenLongBuyValue(state);
       let effectiveMax = maxValue;
       if (addProfit) effectiveMax = effectiveMax.plus(state.totalProfit || 0);
-      if (totalBought.plus(transactionValue).gt(effectiveMax)) {
+      if (openBoughtValue.plus(transactionValue).gt(effectiveMax)) {
         if (DEBUG_CONDITIONS) {
           console.log(
             `🔍 BUY skipped (wallet.maxDefined) wallet=${state.walletAddress} order=${state.orderId} ` +
               `symbol=${symbol} base=${baseAsset} quote=${quoteAsset} price=${currentPrice?.toString?.() ?? currentPrice ?? "-"} ` +
-              `totalBought=${totalBought.toString()} maxValue=${maxValue.toString()} ` +
+              `totalBoughtOpen=${openBoughtValue.toString()} maxValue=${maxValue.toString()} ` +
               `effectiveMax=${effectiveMax.toString()} addProfit=${addProfit} ` +
               `txValue=${transactionValue.toString()}`,
           );
@@ -471,15 +473,17 @@ async function canExecuteSell(amount, currentPrice, state, settings) {
     }
     case "maxDefined": {
       // Sprzedaje do określonego maksimum
-      const totalSold = new Decimal(state.totalSoldValue || 0);
+      // Używamy TYLKO wartości otwartych pozycji short (SELL),
+      // żeby zamknięte shorty zwalniały limit.
+      const totalSoldOpen = await getOpenShortSellValue(state);
       let effectiveMax = maxValue;
       if (addProfit) effectiveMax = effectiveMax.plus(state.totalProfit || 0);
-      if (maxValue.gt(0) && totalSold.plus(txValue).gt(effectiveMax)) {
+      if (maxValue.gt(0) && totalSoldOpen.plus(txValue).gt(effectiveMax)) {
         if (DEBUG_CONDITIONS) {
           console.log(
             `🔍 SELL skipped (wallet.maxDefined) wallet=${state.walletAddress} order=${state.orderId} ` +
               `symbol=${symbol} base=${baseAsset} quote=${quoteAsset} price=${currentPrice?.toString?.() ?? "-"} ` +
-              `totalSold=${totalSold.toString()} maxValue=${maxValue.toString()} ` +
+              `totalSoldOpen=${totalSoldOpen.toString()} maxValue=${maxValue.toString()} ` +
               `effectiveMax=${effectiveMax.toString()} addProfit=${addProfit} ` +
               `txValue=${txValue.toString()}`,
           );
@@ -530,6 +534,65 @@ function meetsMinTransactionValue(transactionValue, settings) {
       e?.message,
     );
     return true;
+  }
+}
+
+/**
+ * Zwraca łączną wartość OTWARTYCH pozycji long (BUY) dla danego stanu GRID.
+ * Używane w logice wallet.maxDefined, żeby limit opierał się na faktycznie
+ * zajętym kapitale, a nie na historycznej sumie wszystkich zakupów.
+ */
+async function getOpenLongBuyValue(state) {
+  try {
+    const positions = await Position.findOpenByWalletAndOrderId(
+      state.walletAddress,
+      state.orderId,
+    );
+
+    let sum = new Decimal(0);
+    for (const p of positions) {
+      // Traktuj brak typu jako BUY (stare rekordy)
+      if (p.type && p.type !== PositionType.BUY) continue;
+      if (p.buyValue == null) continue;
+      sum = sum.plus(new Decimal(p.buyValue));
+    }
+
+    return sum;
+  } catch (e) {
+    console.warn(
+      "⚠️ getOpenLongBuyValue: failed to sum open BUY positions, falling back to 0:",
+      e?.message,
+    );
+    return new Decimal(0);
+  }
+}
+
+/**
+ * Zwraca łączną wartość OTWARTYCH pozycji short (SELL) dla danego stanu GRID.
+ * Używane w logice wallet.maxDefined po stronie sprzedaży, żeby limit
+ * opierał się na faktycznie otwartych shortach, a nie na historii.
+ */
+async function getOpenShortSellValue(state) {
+  try {
+    const positions = await Position.findOpenByWalletAndOrderId(
+      state.walletAddress,
+      state.orderId,
+    );
+
+    let sum = new Decimal(0);
+    for (const p of positions) {
+      if (p.type && p.type !== PositionType.SELL) continue;
+      if (p.sellValue == null) continue;
+      sum = sum.plus(new Decimal(p.sellValue));
+    }
+
+    return sum;
+  } catch (e) {
+    console.warn(
+      "⚠️ getOpenShortSellValue: failed to sum open SELL positions, falling back to 0:",
+      e?.message,
+    );
+    return new Decimal(0);
   }
 }
 
