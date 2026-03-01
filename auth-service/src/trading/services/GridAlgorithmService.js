@@ -870,7 +870,7 @@ async function executeBuy(currentPrice, state, settings) {
 
   let buyPriceNum = toNum(executedPrice);
   let amountNum = toNum(executedAmount);
-  const buyValueNum = executedPrice.mul(executedAmount).toNumber();
+  let buyValueNum = executedPrice.mul(executedAmount).toNumber();
 
   if (buyPriceNum <= 0 || amountNum <= 0) {
     console.warn(
@@ -878,6 +878,10 @@ async function executeBuy(currentPrice, state, settings) {
     );
     buyPriceNum = toNum(currentPrice);
     amountNum = toNum(amount);
+  }
+  // Zawsze ustaw wartość zakupu (cena × ilość), żeby w UI kolumna „Wartość” miała dane
+  if (buyValueNum <= 0 || !Number.isFinite(buyValueNum)) {
+    buyValueNum = buyPriceNum * amountNum;
   }
 
   // Zapisz pozycję

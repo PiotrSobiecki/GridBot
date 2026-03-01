@@ -256,8 +256,20 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                 const unrealized = calculateUnrealizedPnL(position);
                 const entryPrice =
                   activeTab === "buy" ? position.buyPrice : position.sellPrice;
-                const entryValue =
+                const rawEntryValue =
                   activeTab === "buy" ? position.buyValue : position.sellValue;
+                // Gdy wartość nie przyszła z API (stare rekordy / błąd), licz z ceny × ilość
+                const entryValue =
+                  rawEntryValue != null &&
+                  !Number.isNaN(Number(rawEntryValue)) &&
+                  Number(rawEntryValue) > 0
+                    ? Number(rawEntryValue)
+                    : entryPrice != null &&
+                        position.amount != null &&
+                        Number(entryPrice) > 0 &&
+                        Number(position.amount) > 0
+                      ? Number(entryPrice) * Number(position.amount)
+                      : null;
                 const isClosed = position.status === "CLOSED";
                 // Kolumna cel/wyjście:
                 // BUY: dla zamkniętych = cena sprzedaży, dla otwartych = cel sprzedaży.
