@@ -41,11 +41,17 @@ export default function OrderSettings({
   gridState,
   onDuplicate,
 }: OrderSettingsProps) {
-  const { walletAddress, setUserSettings, userSettings, setGridState, prices, gridStates } =
-    useStore();
+  const {
+    walletAddress,
+    setUserSettings,
+    userSettings,
+    setGridState,
+    prices,
+    gridStates,
+  } = useStore();
   const [localOrder, setLocalOrder] = useState(order);
   const [expandedSections, setExpandedSections] = useState<Set<Section>>(
-    new Set(["general"])
+    new Set(["general"]),
   );
   const [isSaving, setIsSaving] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
@@ -66,7 +72,14 @@ export default function OrderSettings({
   // Synchronizuj localOrder z prop order (np. przy przełączeniu zakładki)
   useEffect(() => {
     setLocalOrder(order);
-  }, [order?._id, order?.focusPrice, order?.refreshInterval, order?.name, order?.baseAsset, order?.quoteAsset]);
+  }, [
+    order?._id,
+    order?.focusPrice,
+    order?.refreshInterval,
+    order?.name,
+    order?.baseAsset,
+    order?.quoteAsset,
+  ]);
 
   // Utrzymuj spójność walut kupna/sprzedaży z wybraną parą BASE/QUOTE
   // Tylko jeśli baseAsset/quoteAsset są ustawione i różne od sell/buy.currency
@@ -82,7 +95,11 @@ export default function OrderSettings({
         changed = true;
       }
       // Jeśli baseAsset nie jest ustawione, ale sell.currency jest, użyj go jako baseAsset
-      else if (!prev.baseAsset && prev.sell?.currency && baseAssets.includes(prev.sell.currency)) {
+      else if (
+        !prev.baseAsset &&
+        prev.sell?.currency &&
+        baseAssets.includes(prev.sell.currency)
+      ) {
         next.baseAsset = prev.sell.currency;
         changed = true;
       }
@@ -93,14 +110,23 @@ export default function OrderSettings({
         changed = true;
       }
       // Jeśli quoteAsset nie jest ustawione, ale buy.currency jest, użyj go jako quoteAsset
-      else if (!prev.quoteAsset && prev.buy?.currency && quoteAssets.includes(prev.buy.currency)) {
+      else if (
+        !prev.quoteAsset &&
+        prev.buy?.currency &&
+        quoteAssets.includes(prev.buy.currency)
+      ) {
         next.quoteAsset = prev.buy.currency;
         changed = true;
       }
 
       return changed ? next : prev;
     });
-  }, [localOrder.baseAsset, localOrder.quoteAsset, localOrder.sell?.currency, localOrder.buy?.currency]);
+  }, [
+    localOrder.baseAsset,
+    localOrder.quoteAsset,
+    localOrder.sell?.currency,
+    localOrder.buy?.currency,
+  ]);
 
   // Wyłączone pobieranie z API - używamy sztywnej listy krypto
   // useEffect(() => {
@@ -165,19 +191,19 @@ export default function OrderSettings({
         buyConditions: {
           ...localOrder.buyConditions,
           minValuePer1Percent: Number(
-            (localOrder.buyConditions as any).minValuePer1Percent || 0
+            (localOrder.buyConditions as any).minValuePer1Percent || 0,
           ),
           priceThreshold: Number(
-            (localOrder.buyConditions as any).priceThreshold || 0
+            (localOrder.buyConditions as any).priceThreshold || 0,
           ),
         },
         sellConditions: {
           ...localOrder.sellConditions,
           minValuePer1Percent: Number(
-            (localOrder.sellConditions as any).minValuePer1Percent || 0
+            (localOrder.sellConditions as any).minValuePer1Percent || 0,
           ),
           priceThreshold: Number(
-            (localOrder.sellConditions as any).priceThreshold || 0
+            (localOrder.sellConditions as any).priceThreshold || 0,
           ),
         },
       };
@@ -190,7 +216,7 @@ export default function OrderSettings({
         setUserSettings(freshSettings);
         // Zaktualizuj lokalny stan zlecenia - użyj sanitizedOrder (zapisanego) jako bazę
         const freshOrder = freshSettings.orders?.find(
-          (o: any) => (o._id || o.id) === order._id
+          (o: any) => (o._id || o.id) === order._id,
         );
         // Aktualizuj localOrder z zapisanymi danymi (sanitizedOrder ma wszystkie pola z formularza)
         const updatedLocalOrder = freshOrder
@@ -201,7 +227,10 @@ export default function OrderSettings({
         // Odśwież też stan gridu (gridState) żeby "Cena Focus" na górze się zaktualizowała
         if (walletAddress && order._id) {
           try {
-            const freshGridState = await api.getGridState(walletAddress, order._id);
+            const freshGridState = await api.getGridState(
+              walletAddress,
+              order._id,
+            );
             if (freshGridState) {
               setGridState(order._id, freshGridState);
             }
@@ -212,7 +241,7 @@ export default function OrderSettings({
       } else if (userSettings) {
         // Fallback: aktualizuj lokalnie jeśli pobranie z backendu nie powiodło się
         const updatedOrders = userSettings.orders.map((o) =>
-          o._id === order._id ? { ...sanitizedOrder, _id: order._id } : o
+          o._id === order._id ? { ...sanitizedOrder, _id: order._id } : o,
         );
         setUserSettings({ ...userSettings, orders: updatedOrders });
         setLocalOrder({ ...sanitizedOrder, _id: order._id });
@@ -265,7 +294,7 @@ export default function OrderSettings({
 
       if (userSettings) {
         const updatedOrders = userSettings.orders.filter(
-          (o) => o._id !== order._id
+          (o) => o._id !== order._id,
         );
         setUserSettings({ ...userSettings, orders: updatedOrders });
         useStore
@@ -407,12 +436,18 @@ export default function OrderSettings({
                     <button
                       type="button"
                       onClick={() => {
-                        updateField("focusPrice", Math.round(currentPrice * 100) / 100);
+                        updateField(
+                          "focusPrice",
+                          Math.round(currentPrice * 100) / 100,
+                        );
                         toast.success(
-                          `Cena Focus ustawiona na aktualną: $${currentPrice.toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}`
+                          `Cena Focus ustawiona na aktualną: $${currentPrice.toLocaleString(
+                            undefined,
+                            {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            },
+                          )}`,
                         );
                       }}
                       className="mt-1 text-xs text-emerald-400 hover:text-emerald-300 hover:underline"
@@ -436,32 +471,42 @@ export default function OrderSettings({
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
               <SelectField
                 label="5. Krypto (BASE)"
-                value={localOrder.baseAsset || localOrder.sell?.currency || "BTC"}
+                value={
+                  localOrder.baseAsset || localOrder.sell?.currency || "BTC"
+                }
                 options={baseAssets}
                 onChange={async (v) => {
                   // Ustaw baseAsset i sell.currency jednocześnie
                   // Pobierz aktualną cenę dla nowego krypto
-                  const quoteAsset = localOrder.quoteAsset || localOrder.buy?.currency || "USDT";
+                  const quoteAsset =
+                    localOrder.quoteAsset || localOrder.buy?.currency || "USDT";
                   const symbol = `${v}${quoteAsset}`;
-                  
+
                   // Spróbuj pobrać cenę ze store
                   let currentPrice = prices[symbol]?.price || 0;
-                  
+
                   // Jeśli cena nie jest w store, spróbuj pobrać z API
                   if (!currentPrice && walletAddress) {
                     try {
                       const priceData = await api.getPrices(walletAddress);
                       const priceInfo = priceData[symbol];
                       if (priceInfo) {
-                        currentPrice = typeof priceInfo === "object" && priceInfo !== null && "price" in priceInfo
-                          ? (typeof priceInfo.price === "string" ? parseFloat(priceInfo.price) : Number(priceInfo.price))
-                          : (typeof priceInfo === "string" ? parseFloat(priceInfo) : Number(priceInfo));
+                        currentPrice =
+                          typeof priceInfo === "object" &&
+                          priceInfo !== null &&
+                          "price" in priceInfo
+                            ? typeof priceInfo.price === "string"
+                              ? parseFloat(priceInfo.price)
+                              : Number(priceInfo.price)
+                            : typeof priceInfo === "string"
+                              ? parseFloat(priceInfo)
+                              : Number(priceInfo);
                       }
                     } catch (e) {
                       console.warn(`Failed to fetch price for ${symbol}:`, e);
                     }
                   }
-                  
+
                   setLocalOrder((prev) => {
                     const updated = { ...prev } as any;
                     updated.baseAsset = v;
@@ -472,7 +517,13 @@ export default function OrderSettings({
                     if (updated.sell) {
                       updated.sell = { ...updated.sell, currency: v };
                     } else {
-                      updated.sell = { currency: v, walletProtection: 0, mode: "walletLimit", maxValue: 0, addProfit: false };
+                      updated.sell = {
+                        currency: v,
+                        walletProtection: 0,
+                        mode: "walletLimit",
+                        maxValue: 0,
+                        addProfit: false,
+                      };
                     }
                     return updated;
                   });
@@ -484,27 +535,35 @@ export default function OrderSettings({
                 options={quoteAssets}
                 onChange={async (v) => {
                   // Pobierz aktualną cenę dla nowej pary BASE/QUOTE
-                  const baseAsset = localOrder.baseAsset || localOrder.sell?.currency || "BTC";
+                  const baseAsset =
+                    localOrder.baseAsset || localOrder.sell?.currency || "BTC";
                   const symbol = `${baseAsset}${v}`;
-                  
+
                   // Spróbuj pobrać cenę ze store
                   let currentPrice = prices[symbol]?.price || 0;
-                  
+
                   // Jeśli cena nie jest w store, spróbuj pobrać z API
                   if (!currentPrice && walletAddress) {
                     try {
                       const priceData = await api.getPrices(walletAddress);
                       const priceInfo = priceData[symbol];
                       if (priceInfo) {
-                        currentPrice = typeof priceInfo === "object" && priceInfo !== null && "price" in priceInfo
-                          ? (typeof priceInfo.price === "string" ? parseFloat(priceInfo.price) : Number(priceInfo.price))
-                          : (typeof priceInfo === "string" ? parseFloat(priceInfo) : Number(priceInfo));
+                        currentPrice =
+                          typeof priceInfo === "object" &&
+                          priceInfo !== null &&
+                          "price" in priceInfo
+                            ? typeof priceInfo.price === "string"
+                              ? parseFloat(priceInfo.price)
+                              : Number(priceInfo.price)
+                            : typeof priceInfo === "string"
+                              ? parseFloat(priceInfo)
+                              : Number(priceInfo);
                       }
                     } catch (e) {
                       console.warn(`Failed to fetch price for ${symbol}:`, e);
                     }
                   }
-                  
+
                   setLocalOrder((prev) => {
                     const updated = { ...prev } as any;
                     updated.quoteAsset = v;
@@ -515,7 +574,13 @@ export default function OrderSettings({
                     if (updated.buy) {
                       updated.buy = { ...updated.buy, currency: v };
                     } else {
-                      updated.buy = { currency: v, walletProtection: 0, mode: "walletLimit", maxValue: 0, addProfit: false };
+                      updated.buy = {
+                        currency: v,
+                        walletProtection: 0,
+                        mode: "walletLimit",
+                        maxValue: 0,
+                        addProfit: false,
+                      };
                     }
                     return updated;
                   });
@@ -802,7 +867,7 @@ export default function OrderSettings({
                     onChange={(v) =>
                       updateField(
                         "buyConditions.minValuePer1Percent",
-                        v === "" ? "" : Number(v)
+                        v === "" ? "" : Number(v),
                       )
                     }
                     type="number"
@@ -815,7 +880,7 @@ export default function OrderSettings({
                     onChange={(v) =>
                       updateField(
                         "buyConditions.priceThreshold",
-                        v === "" ? "" : Number(v)
+                        v === "" ? "" : Number(v),
                       )
                     }
                     type="number"
@@ -831,7 +896,7 @@ export default function OrderSettings({
                       onChange={(v) =>
                         updateField(
                           "buyConditions.checkThresholdIfProfitable",
-                          v
+                          v,
                         )
                       }
                     />
@@ -855,7 +920,7 @@ export default function OrderSettings({
                     onChange={(v) =>
                       updateField(
                         "sellConditions.minValuePer1Percent",
-                        v === "" ? "" : Number(v)
+                        v === "" ? "" : Number(v),
                       )
                     }
                     type="number"
@@ -868,7 +933,7 @@ export default function OrderSettings({
                     onChange={(v) =>
                       updateField(
                         "sellConditions.priceThreshold",
-                        v === "" ? "" : Number(v)
+                        v === "" ? "" : Number(v),
                       )
                     }
                     type="number"
@@ -884,7 +949,7 @@ export default function OrderSettings({
                       onChange={(v) =>
                         updateField(
                           "sellConditions.checkThresholdIfProfitable",
-                          v
+                          v,
                         )
                       }
                     />
@@ -911,9 +976,9 @@ export default function OrderSettings({
                 <span className="font-mono">
                   {localOrder.baseAsset || "BTC"}
                 </span>{" "}
-                przekroczy ten próg, algorytm zatrzyma wyliczanie
-                nowej ceny focus i nie wykona zakupu, dopóki cena nie spadnie
-                poniżej progu.
+                przekroczy ten próg, algorytm zatrzyma wyliczanie nowej ceny
+                focus i nie wykona zakupu, dopóki cena nie spadnie poniżej
+                progu.
               </div>
             </div>
           </div>
@@ -951,7 +1016,8 @@ export default function OrderSettings({
                 {localOrder.trendPercents
                   .sort((a, b) => a.trend - b.trend)
                   .map(
-                    (tp) => `${tp.trend}=Z${tp.buyPercent}%|S${tp.sellPercent}%`
+                    (tp) =>
+                      `${tp.trend}=Z${tp.buyPercent}%|S${tp.sellPercent}%`,
                   )
                   .join("; ")}
               </code>
@@ -983,7 +1049,7 @@ export default function OrderSettings({
                           onChange={(e) => {
                             const newPercents = [...localOrder.trendPercents];
                             const realIdx = localOrder.trendPercents.findIndex(
-                              (t) => t.trend === tp.trend
+                              (t) => t.trend === tp.trend,
                             );
                             newPercents[realIdx] = {
                               ...tp,
@@ -1008,7 +1074,7 @@ export default function OrderSettings({
                           onChange={(e) => {
                             const newPercents = [...localOrder.trendPercents];
                             const realIdx = localOrder.trendPercents.findIndex(
-                              (t) => t.trend === tp.trend
+                              (t) => t.trend === tp.trend,
                             );
                             newPercents[realIdx] = {
                               ...tp,
@@ -1034,7 +1100,7 @@ export default function OrderSettings({
                           onChange={(e) => {
                             const newPercents = [...localOrder.trendPercents];
                             const realIdx = localOrder.trendPercents.findIndex(
-                              (t) => t.trend === tp.trend
+                              (t) => t.trend === tp.trend,
                             );
                             newPercents[realIdx] = {
                               ...tp,
@@ -1051,7 +1117,7 @@ export default function OrderSettings({
                       <button
                         onClick={() => {
                           const newPercents = localOrder.trendPercents.filter(
-                            (t) => t.trend !== tp.trend
+                            (t) => t.trend !== tp.trend,
                           );
                           updateField("trendPercents", newPercents);
                         }}
@@ -1069,7 +1135,7 @@ export default function OrderSettings({
               onClick={() => {
                 const maxTrend = Math.max(
                   ...localOrder.trendPercents.map((t) => t.trend),
-                  -1
+                  -1,
                 );
                 updateField("trendPercents", [
                   ...localOrder.trendPercents,
@@ -1331,11 +1397,13 @@ export default function OrderSettings({
                 Czy na pewno chcesz trwale usunąć zlecenie{" "}
                 <span className="font-mono text-red-300 font-semibold">
                   {localOrder.name}
-                </span>?
+                </span>
+                ?
               </p>
               <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-5">
                 <p className="text-xs text-red-300/90">
-                  ⚠️ To działanie jest <strong>nieodwracalne</strong>. Zostaną usunięte:
+                  ⚠️ To działanie jest <strong>nieodwracalne</strong>. Zostaną
+                  usunięte:
                 </p>
                 <ul className="text-xs text-gray-400 mt-2 ml-4 list-disc space-y-1">
                   <li>Wszystkie ustawienia zlecenia</li>
@@ -1441,7 +1509,9 @@ function InputField({
 }) {
   return (
     <div>
-      <label className="block text-[10px] sm:text-xs text-gray-500 mb-1">{label}</label>
+      <label className="block text-[10px] sm:text-xs text-gray-500 mb-1">
+        {label}
+      </label>
       <div className="relative">
         <input
           type={type}
@@ -1459,7 +1529,9 @@ function InputField({
           </span>
         )}
       </div>
-      {hint && <div className="text-[10px] sm:text-xs text-gray-600 mt-1">{hint}</div>}
+      {hint && (
+        <div className="text-[10px] sm:text-xs text-gray-600 mt-1">{hint}</div>
+      )}
     </div>
   );
 }
@@ -1485,7 +1557,8 @@ function SelectField({
       >
         {options.map((opt) => {
           const optValue = typeof opt === "string" ? opt : opt.value;
-          const optLabel = typeof opt === "string" ? opt : (opt.label || opt.value);
+          const optLabel =
+            typeof opt === "string" ? opt : opt.label || opt.value;
           return (
             <option key={optValue} value={optValue}>
               {optLabel}
