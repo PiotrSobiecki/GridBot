@@ -110,11 +110,22 @@ async function getSymbolPrecision(symbol, walletAddress = null, forcedExchange =
     (f) => f.filterType === "MIN_NOTIONAL"
   );
 
+  // Dla par z USDT (i innych stablecoinów) kwota w quote ma być zaokrąglona do 2 miejsc
+  // (BingX zwraca quotePrecision=2, AsterDex może zwracać 8 – ujednolicamy do 2)
+  const quoteAsset = (
+    symbolInfo.quoteAsset ||
+    (upperSymbol.endsWith("USDT") ? "USDT" : "") ||
+    ""
+  ).toUpperCase();
+  const isStableQuote = ["USDT", "USDC", "BUSD", "DAI"].includes(quoteAsset);
+  const quotePrecision =
+    isStableQuote ? 2 : (symbolInfo.quotePrecision ?? null);
+
   return {
     stepSize: lotSizeFilter?.stepSize || null,
     tickSize: priceFilter?.tickSize || null,
     minNotional: minNotionalFilter?.minNotional || null,
-    quotePrecision: symbolInfo.quotePrecision || null, // Precyzja dla quote currency
+    quotePrecision, // Precyzja dla quote currency (2 dla USDT itd.)
     basePrecision: symbolInfo.basePrecision || null, // Precyzja dla base currency
   };
 }

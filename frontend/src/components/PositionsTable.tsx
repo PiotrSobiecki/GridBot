@@ -401,7 +401,7 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                               ${Math.abs(unrealized.pnl).toFixed(2)}
                             </span>
                             <span className="sm:hidden">
-                              ${Math.abs(unrealized.pnl).toFixed(0)}
+                              ${Math.abs(unrealized.pnl).toFixed(2)}
                             </span>
                           </div>
                           <div className="text-[10px] sm:text-xs opacity-70">
@@ -452,7 +452,7 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                                 ${closedProfit.toFixed(2)}
                               </span>
                               <span className="sm:hidden">
-                                ${closedProfit.toFixed(0)}
+                                ${closedProfit.toFixed(2)}
                               </span>
                             </div>
                           );
