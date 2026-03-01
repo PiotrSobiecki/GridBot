@@ -37,6 +37,37 @@ const getCurrencyIconUrl = (symbol: string): string | null => {
   }
 };
 
+/** Ikonka waluty z fallbackiem na literki gdy obrazek się nie załaduje */
+function CurrencyIconWithFallback({
+  iconUrl,
+  currency,
+  fallbackClass,
+}: {
+  iconUrl: string;
+  currency: string;
+  fallbackClass: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const baseClass =
+    "w-full h-full flex items-center justify-center text-xs font-bold";
+  if (failed) {
+    return (
+      <div className={`${baseClass} ${fallbackClass}`}>
+        {currency.slice(0, 3)}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={iconUrl}
+      alt=""
+      className="w-full h-full object-contain"
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 export default function WalletPanel({ onClose }: WalletPanelProps) {
   const { userSettings, setUserSettings, walletAddress, prices } = useStore();
   const [isEditing, setIsEditing] = useState(false);
@@ -337,15 +368,6 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
                   <div className="w-8 h-8 rounded-full overflow-hidden bg-grid-bg border border-grid-border flex items-center justify-center">
                     {(() => {
                       const iconUrl = getCurrencyIconUrl(item.currency);
-                      if (iconUrl) {
-                        return (
-                          // eslint-disable-next-line jsx-a11y/alt-text
-                          <img
-                            src={iconUrl}
-                            className="w-full h-full object-contain"
-                          />
-                        );
-                      }
                       const cur = item.currency.toUpperCase();
                       const baseClass =
                         "w-full h-full flex items-center justify-center text-xs font-bold";
@@ -365,11 +387,21 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
                                     : cur === "ASTER"
                                       ? "bg-emerald-500/20 text-emerald-300"
                                       : "bg-gray-500/20 text-gray-400";
-                      return (
+                      const fallback = (
                         <div className={`${baseClass} ${cls}`}>
                           {cur.slice(0, 3)}
                         </div>
                       );
+                      if (iconUrl) {
+                        return (
+                          <CurrencyIconWithFallback
+                            iconUrl={iconUrl}
+                            currency={cur}
+                            fallbackClass={cls}
+                          />
+                        );
+                      }
+                      return fallback;
                     })()}
                   </div>
                   <div>
