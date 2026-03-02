@@ -434,11 +434,12 @@ export default function OrderSettings({
                       ? priceData.price
                       : Number(priceData?.price || 0);
                   const hasPrice = !!base && currentPrice > 0;
+                  const isFocusLocked = !!order._id && localOrder.focusLocked;
                   return hasPrice ? (
                     <button
                       type="button"
                       onClick={() => {
-                        if (order._id && localOrder.focusLocked) {
+                        if (isFocusLocked) {
                           return;
                         }
                         updateField(
@@ -455,7 +456,9 @@ export default function OrderSettings({
                           )}`,
                         );
                       }}
-                      className="mt-1 text-xs text-emerald-400 hover:text-emerald-300 hover:underline"
+                      className={`mt-1 text-xs text-emerald-400 hover:text-emerald-300 hover:underline ${
+                        isFocusLocked ? "opacity-40 cursor-not-allowed" : ""
+                      }`}
                     >
                       Użyj aktualnej ceny
                     </button>
