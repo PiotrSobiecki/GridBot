@@ -456,7 +456,9 @@ async function canExecuteSell(amount, currentPrice, state, settings) {
   const quoteAsset = settings.quoteAsset || settings.buy?.currency || "USDT";
   const symbol = `${baseAsset}${quoteAsset}`;
   const txValue = currentPrice
-    ? amount.mul(new Decimal(currentPrice)).toDecimalPlaces(PRICE_SCALE, Decimal.ROUND_DOWN)
+    ? amount
+        .mul(new Decimal(currentPrice))
+        .toDecimalPlaces(PRICE_SCALE, Decimal.ROUND_DOWN)
     : new Decimal(0);
 
   switch (mode) {
@@ -520,7 +522,7 @@ function meetsMinTransactionValue(transactionValue, settings) {
     // Minimalna wartość z ustawień (jeśli użytkownik chce wyższy próg)
 
     // Minimalna wartość narzucona przez giełdę
-    const exchangeMin = new Decimal(4); // 4 USDT
+    const exchangeMin = new Decimal(2); // 2 USDT
 
     const effectiveMin = exchangeMin;
 
