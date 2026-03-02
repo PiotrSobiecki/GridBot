@@ -75,6 +75,9 @@ export interface OrderSettings {
   // Giełda dla tego zlecenia
   exchange?: "asterdex" | "bingx";
 
+  // Tryb kierunku zleceń: tylko kupno, tylko sprzedaż, oba
+  tradeMode?: "both" | "buyOnly" | "sellOnly";
+
   // 2# Wymagania KUPNO/SPRZEDAŻ
   buy: BuySellSettings;
   sell: BuySellSettings;

@@ -66,6 +66,8 @@ export class UserSettings {
           quoteAsset: "USDT",
           // Giełda dla tego zlecenia (domyślnie taka sama jak wybrana giełda użytkownika)
           exchange: this.exchange || "asterdex",
+          // Domyślnie zlecenie może otwierać pozycje w obu kierunkach (kupno i sprzedaż)
+          tradeMode: "both",
           buy: {
             currency: "USDT",
             walletProtection: 100,

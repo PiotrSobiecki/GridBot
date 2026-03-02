@@ -211,6 +211,15 @@ export async function processPrice(
   }
 
   const price = new Decimal(currentPrice);
+  // Tryb kierunku zleceń:
+  // - "both" (domyślnie) – otwieraj pozycje BUY i SELL,
+  // - "buyOnly" – otwieraj tylko nowe pozycje BUY (long),
+  // - "sellOnly" – otwieraj tylko nowe pozycje SELL (short).
+  // Zamknięcia istniejących pozycji (take profit / buyback) zawsze są dozwolone.
+  const tradeMode = settings.tradeMode || "both";
+  const allowLongEntries = tradeMode === "both" || tradeMode === "buyOnly";
+  const allowShortEntries = tradeMode === "both" || tradeMode === "sellOnly";
+
   state.lastKnownPrice = price.toNumber();
   state.lastPriceUpdate = new Date().toISOString();
 
@@ -218,7 +227,7 @@ export async function processPrice(
   await checkAndUpdateFocusTime(state, price, settings);
 
   // Sprawdź warunki kupna
-  if (shouldBuy(price, state, settings)) {
+  if (allowLongEntries && shouldBuy(price, state, settings)) {
     await executeBuy(price, state, settings);
     // Po wykonaniu zakupu przeładuj stan z bazy, aby kolejne sprawdzenia używały zaktualizowanego focusPrice
     const updatedState = await GridState.findByWalletAndOrderId(
@@ -252,7 +261,7 @@ export async function processPrice(
   }
 
   // Sprawdź warunki sprzedaży short
-  if (shouldSellShort(price, state, settings)) {
+  if (allowShortEntries && shouldSellShort(price, state, settings)) {
     await executeSellShort(price, state, settings);
     // Po wykonaniu sprzedaży przeładuj stan z bazy
     const updatedState = await GridState.findByWalletAndOrderId(

@@ -467,10 +467,30 @@ export default function OrderSettings({
               />
             </div>
 
+            {/* Kierunek zleceń: kupno / sprzedaż / oba */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
+              <SelectField
+                label="5. Kierunek zleceń"
+                value={localOrder.tradeMode || "both"}
+                options={[
+                  { value: "both", label: "Kupno i sprzedaż" },
+                  { value: "buyOnly", label: "Tylko kupno (long)" },
+                  { value: "sellOnly", label: "Tylko sprzedaż (short)" },
+                ]}
+                onChange={(v) => updateField("tradeMode", v)}
+              />
+              <div className="sm:col-span-2 text-[11px] text-gray-500 flex items-center">
+                <span>
+                  Określa, w których kierunkach algorytm może otwierać nowe pozycje
+                  dla tego zlecenia (long, short lub oba).
+                </span>
+              </div>
+            </div>
+
             {/* Para handlowa */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
               <SelectField
-                label="5. Krypto (BASE)"
+                label="6. Krypto (BASE)"
                 value={
                   localOrder.baseAsset || localOrder.sell?.currency || "BTC"
                 }
@@ -530,7 +550,7 @@ export default function OrderSettings({
                 }}
               />
               <SelectField
-                label="6. Stable (QUOTE)"
+                label="7. Stable (QUOTE)"
                 value={localOrder.quoteAsset || localOrder.buy.currency}
                 options={quoteAssets}
                 onChange={async (v) => {
@@ -589,7 +609,7 @@ export default function OrderSettings({
               {/* Aktualna cena - nieedytowalne */}
               <div>
                 <label className="block text-xs text-gray-500 mb-1">
-                  7. Aktualna cena
+                  8. Aktualna cena
                 </label>
                 <div className="w-full px-3 py-2 bg-grid-bg border border-grid-border rounded-lg text-sm font-mono text-gray-200 flex items-center justify-between">
                   <span>
