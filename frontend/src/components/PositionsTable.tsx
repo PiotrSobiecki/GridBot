@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   RefreshCw,
@@ -6,6 +6,7 @@ import {
   TrendingDown,
   ArrowUpCircle,
   ArrowDownCircle,
+  Calendar,
   Trash2,
   AlertTriangle,
 } from "lucide-react";
@@ -153,7 +154,42 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
     }
   };
 
-  const displayPositions = activeTab === "buy" ? buyPositions : sellPositions;
+  // Filtrowanie po dacie
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
+  const dateFromRef = useRef<HTMLInputElement | null>(null);
+  const dateToRef = useRef<HTMLInputElement | null>(null);
+
+  const isWithinDateRange = (position: Position) => {
+    const dateStr = position.createdAt || position.closedAt;
+    if (!dateStr) return true;
+    const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return true;
+
+    if (dateFrom) {
+      const from = new Date(`${dateFrom}T00:00:00`);
+      if (d < from) return false;
+    }
+    if (dateTo) {
+      const to = new Date(`${dateTo}T23:59:59.999`);
+      if (d > to) return false;
+    }
+    return true;
+  };
+
+  const basePositions = activeTab === "buy" ? buyPositions : sellPositions;
+  const displayPositions = basePositions.filter(isWithinDateRange);
+  const totalPages =
+    displayPositions.length > 0
+      ? Math.ceil(displayPositions.length / pageSize)
+      : 1;
+  const safePage = Math.min(currentPage, totalPages);
+  const pagedPositions = displayPositions.slice(
+    (safePage - 1) * pageSize,
+    safePage * pageSize,
+  );
 
   return (
     <div className="bg-grid-card rounded-xl border border-grid-border overflow-hidden">
@@ -187,15 +223,75 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
             <span className="ml-1">({openSellCount})</span>
           </button>
         </div>
-        <button
-          onClick={fetchPositions}
-          disabled={isLoading}
-          className="p-1.5 sm:p-2 rounded-lg hover:bg-grid-bg transition-colors flex-shrink-0"
-        >
-          <RefreshCw
-            className={`w-3 h-3 sm:w-4 sm:h-4 ${isLoading ? "animate-spin" : ""}`}
-          />
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="hidden sm:flex items-center gap-3 text-[11px] text-gray-500">
+            <div className="flex items-center gap-2">
+              <span>Data od:</span>
+              <div className="relative flex items-center">
+                <input
+                  ref={dateFromRef}
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => {
+                    setDateFrom(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="bg-grid-bg border border-grid-border rounded-l px-2 py-1 text-xs pr-7"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const el = dateFromRef.current;
+                    // @ts-ignore – showPicker jest jeszcze experimental
+                    if (el?.showPicker) el.showPicker();
+                    else el?.focus();
+                  }}
+                  className="absolute right-0 h-full px-1.5 border-l border-grid-border text-gray-400 hover:text-emerald-300"
+                >
+                  <Calendar className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span>do:</span>
+              <div className="relative flex items-center">
+                <input
+                  ref={dateToRef}
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => {
+                    setDateTo(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="bg-grid-bg border border-grid-border rounded-l px-2 py-1 text-xs pr-7"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const el = dateToRef.current;
+                    // @ts-ignore – showPicker jest jeszcze experimental
+                    if (el?.showPicker) el.showPicker();
+                    else el?.focus();
+                  }}
+                  className="absolute right-0 h-full px-1.5 border-l border-grid-border text-gray-400 hover:text-emerald-300"
+                >
+                  <Calendar className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={fetchPositions}
+            disabled={isLoading}
+            className="p-1.5 sm:p-2 rounded-lg hover:bg-grid-bg transition-colors flex-shrink-0"
+          >
+            <RefreshCw
+              className={`w-3 h-3 sm:w-4 sm:h-4 ${
+                isLoading ? "animate-spin" : ""
+              }`}
+            />
+          </button>
+        </div>
       </div>
 
       {displayPositions.length === 0 ? (
@@ -252,7 +348,7 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
               </tr>
             </thead>
             <tbody>
-              {displayPositions.map((position, idx) => {
+              {pagedPositions.map((position, idx) => {
                 const unrealized = calculateUnrealizedPnL(position);
                 const entryPrice =
                   activeTab === "buy" ? position.buyPrice : position.sellPrice;
@@ -285,8 +381,6 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                 // Dla SELL zamkniętej: cena zakupu (po której kupiliśmy przed tą sprzedażą)
                 const sellBuyPrice =
                   activeTab === "sell" ? position.buyPrice : null;
-                const sellNextTarget =
-                  activeTab === "sell" ? position.targetBuybackPrice : null;
 
                 return (
                   <motion.tr
@@ -313,7 +407,7 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
                     <td className="p-2 sm:p-3 text-xs sm:text-sm text-gray-500 hidden lg:table-cell">
                       <div className="flex items-center gap-2">
                         <span className="font-mono">
-                          {position.id.slice(0, 8)}…
+                          {position.id.slice(0, 5)}…
                         </span>
                         <button
                           type="button"
@@ -497,11 +591,35 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
         </div>
       )}
 
-      {/* Summary */}
+      {/* Paginacja + podsumowanie */}
       {displayPositions.length > 0 && (
-        <div className="p-3 sm:p-4 bg-grid-bg/30 border-t border-grid-border">
-          <div className="flex justify-between text-xs sm:text-sm">
+        <div className="p-3 sm:p-4 bg-grid-bg/30 border-t border-grid-border space-y-2 sm:space-y-0 sm:flex sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 text-xs sm:text-sm">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={safePage <= 1}
+              className="px-2 py-1 rounded border border-grid-border text-gray-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-grid-bg"
+            >
+              ‹
+            </button>
             <span className="text-gray-500">
+              Strona{" "}
+              <span className="font-mono text-gray-200">
+                {safePage} / {totalPages}
+              </span>
+            </span>
+            <button
+              onClick={() =>
+                setCurrentPage((p) => Math.min(totalPages, p + 1))
+              }
+              disabled={safePage >= totalPages}
+              className="px-2 py-1 rounded border border-grid-border text-gray-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-grid-bg"
+            >
+              ›
+            </button>
+          </div>
+          <div className="flex justify-between sm:justify-end text-xs sm:text-sm">
+            <span className="text-gray-500 mr-2">
               <span className="hidden sm:inline">
                 Suma otwartych {activeTab === "buy" ? "zakupów" : "sprzedaży"}:
               </span>

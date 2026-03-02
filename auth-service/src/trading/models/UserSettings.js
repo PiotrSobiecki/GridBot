@@ -60,6 +60,7 @@ export class UserSettings {
           refreshInterval: 30, // 30 sekund
           minProfitPercent: 0.5,
           focusPrice: 0, // Będzie ustawione na aktualną cenę przy tworzeniu z frontendu
+          focusLocked: true,
           timeToNewFocus: 0,
           baseAsset: "BTC",
           // Na spocie jako stable używamy USDT

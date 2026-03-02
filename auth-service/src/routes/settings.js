@@ -357,10 +357,33 @@ router.put("/orders/:orderId", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    // Merge update data with existing order
+    const existingOrder = settings.orders[orderIndex] || {};
+
+    // Po pierwszym zapisie Focus ma być zablokowany:
+    // - jeśli focusLocked było false i przychodzi focusPrice z frontu,
+    //   zapisujemy tę wartość i ustawiamy focusLocked = true,
+    // - jeśli focusLocked jest już true, ignorujemy kolejne zmiany focusPrice.
+    const wasLocked = existingOrder.focusLocked === true;
+
+    let nextFocusPrice = existingOrder.focusPrice;
+    let nextFocusLocked = wasLocked === true;
+    let focusChangedThisUpdate = false;
+
+    if (!wasLocked && typeof updateData.focusPrice === "number") {
+      nextFocusPrice = updateData.focusPrice;
+      nextFocusLocked = true;
+      focusChangedThisUpdate = true;
+    }
+
+    // Merge update data with existing order (z korektą focus)
     const updatedOrder = {
-      ...settings.orders[orderIndex],
+      ...existingOrder,
       ...updateData,
+      focusLocked: nextFocusLocked,
+      focusPrice:
+        typeof nextFocusPrice === "number"
+          ? nextFocusPrice
+          : existingOrder.focusPrice,
       id: orderId,
       _id: orderId,
     };
@@ -375,7 +398,7 @@ router.put("/orders/:orderId", authMiddleware, async (req, res) => {
     try {
       const lowerWallet = req.walletAddress.toLowerCase();
       const state = await GridState.findByWalletAndOrderId(lowerWallet, orderId);
-      if (state && typeof updatedOrder.focusPrice === "number") {
+      if (state && focusChangedThisUpdate && typeof updatedOrder.focusPrice === "number") {
         const focusPrice = updatedOrder.focusPrice || 0;
         state.currentFocusPrice = focusPrice;
         state.focusLastUpdated = new Date().toISOString();

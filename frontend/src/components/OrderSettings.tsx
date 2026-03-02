@@ -419,6 +419,8 @@ export default function OrderSettings({
                   type="number"
                   suffix="$"
                   hint="Cena bazowa do obliczeń"
+                  infoTitle="Focus to cena bazowa, od której liczone są wszystkie kolejne poziomy zakupów i sprzedaży dla tego zlecenia. Po pierwszym zapisaniu Focus jest blokowany, żeby zachować spójność historii pozycji."
+                  disabled={!!order._id && localOrder.focusLocked}
                 />
                 {(() => {
                   const base =
@@ -436,6 +438,9 @@ export default function OrderSettings({
                     <button
                       type="button"
                       onClick={() => {
+                        if (order._id && localOrder.focusLocked) {
+                          return;
+                        }
                         updateField(
                           "focusPrice",
                           Math.round(currentPrice * 100) / 100,
@@ -456,6 +461,28 @@ export default function OrderSettings({
                     </button>
                   ) : null;
                 })()}
+                {/*
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="block text-[10px] sm:text-xs text-gray-500">
+                    Blokada Focus
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={localOrder.focusLocked ?? true}
+                    onChange={(e) =>
+                      updateField("focusLocked", e.target.checked)
+                    }
+                    className="custom-checkbox"
+                  />
+                  <button
+                    type="button"
+                    className="w-4 h-4 rounded-full border border-gray-600 text-[10px] flex items-center justify-center text-gray-400 hover:text-emerald-300 hover:border-emerald-400"
+                    title="Po zaznaczeniu cena Focus dla tego zlecenia jest zablokowana i nie może być później zmieniona."
+                  >
+                    i
+                  </button>
+                </div>
+                */}
               </div>
               <InputField
                 label="4. Czas do nowego focus"
@@ -481,8 +508,8 @@ export default function OrderSettings({
               />
               <div className="sm:col-span-2 text-[11px] text-gray-500 flex items-center">
                 <span>
-                  Określa, w których kierunkach algorytm może otwierać nowe pozycje
-                  dla tego zlecenia (long, short lub oba).
+                  Określa, w których kierunkach algorytm może otwierać nowe
+                  pozycje dla tego zlecenia (long, short lub oba).
                 </span>
               </div>
             </div>
@@ -1517,6 +1544,7 @@ function InputField({
   suffix,
   hint,
   disabled = false,
+  infoTitle,
 }: {
   label: string;
   value: any;
@@ -1526,11 +1554,21 @@ function InputField({
   suffix?: string;
   hint?: string;
   disabled?: boolean;
+  infoTitle?: string;
 }) {
   return (
     <div>
-      <label className="block text-[10px] sm:text-xs text-gray-500 mb-1">
-        {label}
+      <label className="block text-[10px] sm:text-xs text-gray-500 mb-1 flex items-center gap-1">
+        <span>{label}</span>
+        {infoTitle && (
+          <button
+            type="button"
+            className="w-3.5 h-3.5 rounded-full border border-gray-600 text-[9px] flex items-center justify-center text-gray-400 hover:text-emerald-300 hover:border-emerald-400"
+            title={infoTitle}
+          >
+            i
+          </button>
+        )}
       </label>
       <div className="relative">
         <input

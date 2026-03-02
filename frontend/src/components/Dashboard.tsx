@@ -28,6 +28,7 @@ const defaultOrder: Omit<OrderSettingsType, "_id"> = {
   refreshInterval: 30, // 30 sekund
   minProfitPercent: 0.5,
   focusPrice: 0, // Będzie ustawione na aktualną cenę przy tworzeniu
+  focusLocked: false,
   exchange: "asterdex", // Domyślnie AsterDex, będzie nadpisane przy tworzeniu
   timeToNewFocus: 0,
   buyTrendCounter: 0,

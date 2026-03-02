@@ -1,7 +1,8 @@
-import { motion } from 'framer-motion';
-import { Activity, Pause } from 'lucide-react';
-import { useStore } from '../store/useStore';
-import type { OrderSettings, GridState } from '../types';
+import { motion } from "framer-motion";
+import { Activity, Pause } from "lucide-react";
+import toast from "react-hot-toast";
+import { useStore } from "../store/useStore";
+import type { OrderSettings, GridState } from "../types";
 
 interface OrderTabsProps {
   orders: OrderSettings[];
@@ -35,6 +36,10 @@ export default function OrderTabs({
 
         const orderId = order._id || (order as any).id;
         const orderPositions = orderId ? positions[orderId] || [] : [];
+        const shortOrderId =
+          orderId && typeof orderId === "string"
+            ? `${orderId.slice(0, 5)}…`
+            : "";
 
         const openBuyPositions = orderPositions.filter(
           (p) => (p.type === "BUY" || !p.type) && p.status === "OPEN",
@@ -97,20 +102,54 @@ export default function OrderTabs({
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {isRunning ? (
-                  <div className="relative">
-                    <Activity className="w-4 h-4 text-emerald-400" />
-                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-400 rounded-full pulse-dot" />
-                  </div>
-                ) : (
-                  <Pause className="w-4 h-4 text-gray-500" />
-                )}
-                <span className={`text-sm font-medium ${isActive ? 'text-white' : 'text-gray-400'}`}>
-                  {order.name}
-                </span>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {isRunning ? (
+                    <div className="relative">
+                      <Activity className="w-4 h-4 text-emerald-400" />
+                      <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-400 rounded-full pulse-dot" />
+                    </div>
+                  ) : (
+                    <Pause className="w-4 h-4 text-gray-500" />
+                  )}
+                  <span
+                    className={`text-sm font-medium ${
+                      isActive ? "text-white" : "text-gray-400"
+                    }`}
+                  >
+                    {order.name}
+                  </span>
+                </div>
               </div>
+
+              {orderId && (
+                <div className="flex items-center justify-between gap-2 text-[10px] text-gray-500">
+                  <div className="flex items-center gap-1">
+                    <span>ID:</span>
+                    <span className="font-mono text-gray-300">
+                      {shortOrderId}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (navigator?.clipboard?.writeText && orderId) {
+                        navigator.clipboard
+                          .writeText(orderId)
+                          .then(() => {
+                            toast.success("Skopiowano ID zlecenia");
+                          })
+                          .catch(() => {});
+                      }
+                    }}
+                    className="px-1.5 py-0.5 border border-grid-border rounded text-[10px] text-gray-400 hover:text-emerald-300 hover:border-emerald-400 transition-colors"
+                  >
+                    Kopiuj
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="mt-2 flex flex-col gap-0.5 text-xs">

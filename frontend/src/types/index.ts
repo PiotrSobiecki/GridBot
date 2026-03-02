@@ -64,6 +64,7 @@ export interface OrderSettings {
   refreshInterval: number;
   minProfitPercent: number;
   focusPrice: number;
+  focusLocked?: boolean;
   timeToNewFocus: number;
   buyTrendCounter: number;
   sellTrendCounter: number;
