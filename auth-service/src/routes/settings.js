@@ -359,21 +359,27 @@ router.put("/orders/:orderId", authMiddleware, async (req, res) => {
 
     const existingOrder = settings.orders[orderIndex] || {};
 
-    // Po pierwszym zapisie Focus ma być zablokowany:
-    // - jeśli focusLocked było false i przychodzi focusPrice z frontu,
-    //   zapisujemy tę wartość i ustawiamy focusLocked = true,
-    // - jeśli focusLocked jest już true, ignorujemy kolejne zmiany focusPrice.
-    const wasLocked = existingOrder.focusLocked === true;
+    // Logika Focus:
+    // - focusLocked na froncie (checkbox) służy tylko do "tymczasowego odblokowania" na czas edycji,
+    // - po ZAPISANIU zawsze zapisujemy focusLocked = true,
+    // - focusPrice można zmienić:
+    //    * przy pierwszym ustawieniu (brak wartości lub 0),
+    //    * lub gdy użytkownik wyśle focusLocked=false (odblokowanie na tę jedną edycję).
+    const isFirstFocus =
+      typeof existingOrder.focusPrice !== "number" ||
+      existingOrder.focusPrice === 0;
+    const unblockRequested = updateData.focusLocked === false;
 
     let nextFocusPrice = existingOrder.focusPrice;
-    let nextFocusLocked = wasLocked === true;
     let focusChangedThisUpdate = false;
 
-    if (!wasLocked && typeof updateData.focusPrice === "number") {
+    if ((isFirstFocus || unblockRequested) && typeof updateData.focusPrice === "number") {
       nextFocusPrice = updateData.focusPrice;
-      nextFocusLocked = true;
-      focusChangedThisUpdate = true;
+      focusChangedThisUpdate = existingOrder.focusPrice !== updateData.focusPrice;
     }
+
+    // Po zapisie Focus jest zawsze zablokowany – checkbox na froncie znów będzie zaznaczony.
+    const nextFocusLocked = true;
 
     // Merge update data with existing order (z korektą focus)
     const updatedOrder = {
