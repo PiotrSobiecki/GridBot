@@ -92,6 +92,7 @@ export default function Dashboard() {
     setGridState,
     gridStates,
     logout,
+    positions,
   } = useStore();
 
   const [showWallet, setShowWallet] = useState(false);
@@ -115,6 +116,42 @@ export default function Dashboard() {
   }, [orders, activeOrderIndex]);
   const activeGridState = activeOrder?._id ? gridStates[activeOrder._id] : null;
 
+  // Trend i liczba otwartych pozycji long/short dla aktywnego zlecenia
+  const activeOrderId = activeOrder?._id || (activeOrder as any)?.id;
+  const activeOrderPositions = activeOrderId
+    ? positions[activeOrderId] || []
+    : [];
+  const openBuyPositions = activeOrderPositions.filter(
+    (p) => (p.type === "BUY" || !p.type) && p.status === "OPEN",
+  );
+  const openSellPositions = activeOrderPositions.filter(
+    (p) => p.type === "SELL" && p.status === "OPEN",
+  );
+
+  // Aktualny trend = trendAtBuy ostatniej otwartej pozycji (jeśli są),
+  // w przeciwnym razie fallback do licznika z GridState.
+  const latestBuyTrend =
+    openBuyPositions.length > 0
+      ? (openBuyPositions.reduce((last, p) => {
+          return p.createdAt &&
+            (!last.createdAt || p.createdAt > last.createdAt)
+            ? p
+            : last;
+        }).trendAtBuy ?? 0)
+      : (activeGridState?.buyTrendCounter ?? activeOrder?.buyTrendCounter ?? 0);
+
+  const latestSellTrend =
+    openSellPositions.length > 0
+      ? (openSellPositions.reduce((last, p) => {
+          return p.createdAt &&
+            (!last.createdAt || p.createdAt > last.createdAt)
+            ? p
+            : last;
+        }).trendAtBuy ?? 0)
+      : (activeGridState?.sellTrendCounter ??
+        activeOrder?.sellTrendCounter ??
+        0);
+
   // Reset activeOrderIndex jeśli aktualne zlecenie nie istnieje (np. po zmianie giełdy)
   useEffect(() => {
     if (orders.length > 0 && activeOrderIndex >= orders.length) {
@@ -132,12 +169,11 @@ export default function Dashboard() {
           api.getApiSettings(),
           api.getSettings(),
         ]);
-        
+
         const currentExchange = settings?.exchange || "asterdex";
-        const exchangeData = currentExchange === "bingx" 
-          ? apiData?.bingx 
-          : apiData?.aster;
-        
+        const exchangeData =
+          currentExchange === "bingx" ? apiData?.bingx : apiData?.aster;
+
         if (exchangeData) {
           const next = {
             name: exchangeData.name,
@@ -163,17 +199,19 @@ export default function Dashboard() {
   // Odśwież zlecenia gdy zmieni się giełda
   useEffect(() => {
     if (!walletAddress) return;
-    
+
     const refreshOrders = async () => {
       try {
         const updatedSettings = await api.getSettings();
         setUserSettings(updatedSettings);
-        console.log(`🔄 Refreshed orders after exchange change: ${updatedSettings.orders?.length || 0} orders for ${updatedSettings.exchange}`);
+        console.log(
+          `🔄 Refreshed orders after exchange change: ${updatedSettings.orders?.length || 0} orders for ${updatedSettings.exchange}`,
+        );
       } catch (e) {
         console.error("Failed to refresh orders after exchange change:", e);
       }
     };
-    
+
     refreshOrders();
   }, [walletAddress, userSettings?.exchange, setUserSettings]);
 
@@ -275,28 +313,35 @@ export default function Dashboard() {
       setIsLoading(true);
       // Przypisz aktualną giełdę do nowego zlecenia
       const currentExchange = userSettings?.exchange || "asterdex";
-      
+
       // Pobierz aktualną cenę dla baseAsset (np. BTCUSDT)
       const baseAsset = defaultOrder.baseAsset || "BTC";
       const quoteAsset = defaultOrder.quoteAsset || "USDT";
       const symbol = `${baseAsset}${quoteAsset}`;
       let currentPrice = useStore.getState().prices[symbol]?.price || 0;
-      
+
       // Jeśli cena nie jest w store, spróbuj pobrać z API
       if (!currentPrice && walletAddress) {
         try {
           const priceData = await api.getPrices(walletAddress);
           const priceInfo = priceData[symbol];
           if (priceInfo) {
-            currentPrice = typeof priceInfo === "object" && priceInfo !== null && "price" in priceInfo
-              ? (typeof priceInfo.price === "string" ? parseFloat(priceInfo.price) : Number(priceInfo.price))
-              : (typeof priceInfo === "string" ? parseFloat(priceInfo) : Number(priceInfo));
+            currentPrice =
+              typeof priceInfo === "object" &&
+              priceInfo !== null &&
+              "price" in priceInfo
+                ? typeof priceInfo.price === "string"
+                  ? parseFloat(priceInfo.price)
+                  : Number(priceInfo.price)
+                : typeof priceInfo === "string"
+                  ? parseFloat(priceInfo)
+                  : Number(priceInfo);
           }
         } catch (e) {
           console.warn(`Failed to fetch price for ${symbol}:`, e);
         }
       }
-      
+
       const newOrder = await api.createOrder({
         ...defaultOrder,
         name: `Zlecenie ${orders.length + 1}`,
@@ -417,13 +462,20 @@ export default function Dashboard() {
                   </div>
                   <div className="flex flex-col">
                     <span className="text-xs text-gray-300">
-                      {apiProfile.name || (apiProfile.exchange === "bingx" ? "Konto BingX" : "Konto Aster")}
+                      {apiProfile.name ||
+                        (apiProfile.exchange === "bingx"
+                          ? "Konto BingX"
+                          : "Konto Aster")}
                     </span>
                     <span className="text-[10px] text-gray-500">
                       {apiProfile.hasKeys ? "Klucze zapisane" : "Brak kluczy"}
                       {apiProfile.exchange && (
                         <span className="ml-1 text-gray-600">
-                          ({apiProfile.exchange === "bingx" ? "BingX" : "AsterDex"})
+                          (
+                          {apiProfile.exchange === "bingx"
+                            ? "BingX"
+                            : "AsterDex"}
+                          )
                         </span>
                       )}
                     </span>
@@ -502,22 +554,16 @@ export default function Dashboard() {
                   <StatCard
                     icon={TrendingUp}
                     label="Trend Zakup"
-                    value={
-                      activeGridState?.buyTrendCounter ??
-                      activeOrder.buyTrendCounter
-                    }
+                    value={latestBuyTrend}
                     color="emerald"
-                    subtitle="Pozycje czekające na sprzedaż"
+                    subtitle={`Otwarte: ${openBuyPositions.length}`}
                   />
                   <StatCard
                     icon={BarChart3}
                     label="Trend Sprzedaż"
-                    value={
-                      activeGridState?.sellTrendCounter ??
-                      activeOrder.sellTrendCounter
-                    }
+                    value={latestSellTrend}
                     color="red"
-                    subtitle="Pozycje czekające na odkup"
+                    subtitle={`Otwarte: ${openSellPositions.length}`}
                   />
                   <StatCard
                     icon={DollarSign}
