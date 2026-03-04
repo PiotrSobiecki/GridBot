@@ -464,7 +464,6 @@ export default function OrderSettings({
                     </button>
                   ) : null;
                 })()}
-                {/*
                 <div className="mt-2 flex items-center gap-2">
                   <span className="block text-[10px] sm:text-xs text-gray-500">
                     Blokada Focus
@@ -485,7 +484,6 @@ export default function OrderSettings({
                     i
                   </button>
                 </div>
-                */}
               </div>
               <InputField
                 label="4. Czas do nowego focus"
