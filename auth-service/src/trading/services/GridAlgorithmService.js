@@ -47,7 +47,7 @@ if (!QUIET_PRODUCTION_LOGS) {
 
 const PRICE_SCALE = 2;
 const AMOUNT_SCALE = 8;
-const DEFAULT_FEE_PERCENT = new Decimal("0.1");
+const DEFAULT_FEE_PERCENT = new Decimal("0");
 
 // Ścieżki do plików z logami transakcji
 const TRANSACTIONS_BUY_FILE = path.join(
