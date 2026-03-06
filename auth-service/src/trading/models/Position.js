@@ -31,6 +31,8 @@ export class Position {
     this.targetBuybackPrice = data.targetBuybackPrice ?? data.target_buyback_price;
     this.status = data.status || PositionStatus.OPEN;
     this.profit = data.profit ?? 0;
+    this.swingHighPrice = data.swingHighPrice ?? data.swing_high_price ?? null;
+    this.swingLowPrice = data.swingLowPrice ?? data.swing_low_price ?? null;
     this.createdAt = data.createdAt || data.created_at;
     this.closedAt = data.closedAt || data.closed_at;
   }
@@ -43,8 +45,9 @@ export class Position {
       INSERT OR REPLACE INTO positions (
         id, wallet_address, order_id, type, buy_price, buy_value,
         sell_price, sell_value, amount, trend_at_buy, target_sell_price,
-        target_buyback_price, status, profit, created_at, closed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        target_buyback_price, status, profit, swing_high_price, swing_low_price,
+        created_at, closed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     await stmt.run(
@@ -62,6 +65,8 @@ export class Position {
       this.targetBuybackPrice,
       this.status,
       this.profit,
+      this.swingHighPrice,
+      this.swingLowPrice,
       this.createdAt,
       this.closedAt
     );
@@ -139,6 +144,8 @@ export class Position {
       targetBuybackPrice: this.targetBuybackPrice,
       status: this.status,
       profit: this.profit,
+      swingHighPrice: this.swingHighPrice,
+      swingLowPrice: this.swingLowPrice,
       createdAt: this.createdAt,
       closedAt: this.closedAt
     };

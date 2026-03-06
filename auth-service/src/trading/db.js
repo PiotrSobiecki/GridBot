@@ -230,6 +230,29 @@ if (usePostgres) {
     }
   }
 
+  // Migracja swing – positions: swing_high_price, swing_low_price
+  for (const col of ['swing_high_price', 'swing_low_price']) {
+    try {
+      await sqliteDb.exec(`ALTER TABLE positions ADD COLUMN ${col} REAL;`);
+      console.log(`✅ Migration: Added ${col} to positions`);
+    } catch (e) {
+      if (!e.message.includes('duplicate column')) {
+        console.log(`ℹ️ Migration: ${col} positions – ${e.message}`);
+      }
+    }
+  }
+  // Migracja swing – grid_states: swing_buy_low_price, swing_sell_high_price
+  for (const col of ['swing_buy_low_price', 'swing_sell_high_price']) {
+    try {
+      await sqliteDb.exec(`ALTER TABLE grid_states ADD COLUMN ${col} REAL;`);
+      console.log(`✅ Migration: Added ${col} to grid_states`);
+    } catch (e) {
+      if (!e.message.includes('duplicate column')) {
+        console.log(`ℹ️ Migration: ${col} grid_states – ${e.message}`);
+      }
+    }
+  }
+
   db = sqliteDb;
   console.log('✅ SQLite database initialized');
   dbInitialized = true;
@@ -335,6 +358,28 @@ async function initPostgresTables(pool) {
   } catch (e) {
     console.error('❌ Migration error:', e.message);
     // Nie przerywamy działania - aplikacja może działać bez tej kolumny (fallback)
+  }
+
+  // Migracja swing – Postgres
+  const swingMigrations = [
+    { table: 'positions', col: 'swing_high_price', type: 'DOUBLE PRECISION' },
+    { table: 'positions', col: 'swing_low_price', type: 'DOUBLE PRECISION' },
+    { table: 'grid_states', col: 'swing_buy_low_price', type: 'DOUBLE PRECISION' },
+    { table: 'grid_states', col: 'swing_sell_high_price', type: 'DOUBLE PRECISION' },
+  ];
+  for (const m of swingMigrations) {
+    try {
+      const chk = await pool.query(
+        `SELECT column_name FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`,
+        [m.table, m.col]
+      );
+      if (chk.rows.length === 0) {
+        await pool.query(`ALTER TABLE ${m.table} ADD COLUMN ${m.col} ${m.type};`);
+        console.log(`✅ Migration: Added ${m.col} to ${m.table} (Postgres)`);
+      }
+    } catch (e) {
+      console.error(`❌ Migration swing ${m.table}.${m.col}:`, e.message);
+    }
   }
 }
 

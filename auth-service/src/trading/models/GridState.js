@@ -27,6 +27,8 @@ export class GridState {
     this.createdAt = data.createdAt || data.created_at;
     this.lastKnownPrice = data.lastKnownPrice ?? data.last_known_price;
     this.lastPriceUpdate = data.lastPriceUpdate || data.last_price_update;
+    this.swingBuyLowPrice = data.swingBuyLowPrice ?? data.swing_buy_low_price ?? null;
+    this.swingSellHighPrice = data.swingSellHighPrice ?? data.swing_sell_high_price ?? null;
   }
 
   _parseJson(value) {
@@ -50,8 +52,9 @@ export class GridState {
         open_position_ids, open_sell_position_ids, total_profit,
         total_buy_transactions, total_sell_transactions, total_bought_value,
         total_sold_value, is_active, last_updated, created_at,
-        last_known_price, last_price_update
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        last_known_price, last_price_update,
+        swing_buy_low_price, swing_sell_high_price
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     await stmt.run(
@@ -75,7 +78,9 @@ export class GridState {
       this.lastUpdated,
       this.createdAt,
       this.lastKnownPrice,
-      this.lastPriceUpdate
+      this.lastPriceUpdate,
+      this.swingBuyLowPrice,
+      this.swingSellHighPrice
     );
 
     return this;
@@ -123,7 +128,9 @@ export class GridState {
       lastUpdated: this.lastUpdated,
       createdAt: this.createdAt,
       lastKnownPrice: this.lastKnownPrice,
-      lastPriceUpdate: this.lastPriceUpdate
+      lastPriceUpdate: this.lastPriceUpdate,
+      swingBuyLowPrice: this.swingBuyLowPrice,
+      swingSellHighPrice: this.swingSellHighPrice
     };
   }
 }

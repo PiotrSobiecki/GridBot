@@ -227,7 +227,12 @@ export async function processPrice(
   await checkAndUpdateFocusTime(state, price, settings);
 
   // Sprawdź warunki kupna
-  if (allowLongEntries && shouldBuy(price, state, settings)) {
+  const buyResult = allowLongEntries ? shouldBuy(price, state, settings) : false;
+  // Zapisz stan swing tracking (nawet jeśli nie kupujemy)
+  if (allowLongEntries && state.swingBuyLowPrice != null) {
+    await state.save();
+  }
+  if (buyResult) {
     await executeBuy(price, state, settings);
     // Po wykonaniu zakupu przeładuj stan z bazy, aby kolejne sprawdzenia używały zaktualizowanego focusPrice
     const updatedState = await GridState.findByWalletAndOrderId(
@@ -261,7 +266,12 @@ export async function processPrice(
   }
 
   // Sprawdź warunki sprzedaży short
-  if (allowShortEntries && shouldSellShort(price, state, settings)) {
+  const sellResult = allowShortEntries ? shouldSellShort(price, state, settings) : false;
+  // Zapisz stan swing tracking (nawet jeśli nie sprzedajemy)
+  if (allowShortEntries && state.swingSellHighPrice != null) {
+    await state.save();
+  }
+  if (sellResult) {
     await executeSellShort(price, state, settings);
     // Po wykonaniu sprzedaży przeładuj stan z bazy
     const updatedState = await GridState.findByWalletAndOrderId(
@@ -281,12 +291,18 @@ export async function processPrice(
   // Funkcja sprawdza wszystkie pozycje short i zamyka te które spełniają warunki
   await checkAndExecuteSellBuybacks(price, state, settings);
   // Po sprawdzeniu wszystkich pozycji short przeładuj stan z bazy
+  // Zachowaj swing tracking values przed nadpisaniem
+  const swingBuyLow = state.swingBuyLowPrice;
+  const swingSellHigh = state.swingSellHighPrice;
   const updatedStateAfterSell = await GridState.findByWalletAndOrderId(
     walletAddress,
     orderId,
   );
   if (updatedStateAfterSell) {
     Object.assign(state, updatedStateAfterSell.toJSON());
+    // Przywróć swing tracking jeśli były ustawione w tym cyklu
+    if (swingBuyLow != null) state.swingBuyLowPrice = swingBuyLow;
+    if (swingSellHigh != null) state.swingSellHighPrice = swingSellHigh;
   }
 
   state.lastUpdated = new Date().toISOString();
@@ -648,17 +664,58 @@ function getSwingPercent(currentPrice, settings, isBuy) {
 }
 
 /**
- * #8 Sprawdza minimalny procent wahania
+ * #8 Trailing-stop swing check.
+ *
+ * Mechanizm:
+ *   1. Gdy target zostanie osiągnięty, bot NIE realizuje od razu – zaczyna śledzić
+ *      najkorzystniejszą cenę (peak/trough).
+ *   2. Realizacja następuje dopiero gdy cena cofnie się od peak/trough o >= swing%.
+ *
+ * @param {Decimal}  currentPrice   – aktualna cena
+ * @param {object}   trackingObj    – obiekt z polami swingHighPrice / swingLowPrice (Position lub GridState)
+ * @param {string}   highField      – nazwa pola peak  (np. 'swingHighPrice' / 'swingSellHighPrice')
+ * @param {string}   lowField       – nazwa pola trough (np. 'swingLowPrice'  / 'swingBuyLowPrice')
+ * @param {Decimal}  swingPercent   – wymagane cofnięcie w %
+ * @param {'up'|'down'} favorableDir – kierunek korzystny ('up' = sprzedaż/short open, 'down' = kupno/buyback)
+ * @returns {{ execute: boolean, updated: boolean }}
+ *    execute – true = cofnięcie wystarczające, realizuj transakcję
+ *    updated – true = peak/trough został zaktualizowany (trzeba zapisać obiekt)
  */
-function meetsMinSwing(previousPrice, currentPrice, trend, settings, isBuy) {
-  const minSwingPercent = getSwingPercent(currentPrice, settings, isBuy);
+function checkSwingTrailing(currentPrice, trackingObj, highField, lowField, swingPercent, favorableDir) {
+  if (swingPercent.eq(0)) return { execute: true, updated: false };
 
-  if (minSwingPercent.eq(0)) return true;
+  if (favorableDir === 'up') {
+    const peak = trackingObj[highField] != null ? new Decimal(trackingObj[highField]) : null;
 
-  const priceDiff = previousPrice.minus(currentPrice).abs();
-  const percentChange = priceDiff.div(previousPrice).mul(100);
+    if (!peak || currentPrice.gt(peak)) {
+      trackingObj[highField] = currentPrice.toNumber();
+      return { execute: false, updated: true };
+    }
 
-  return percentChange.gte(minSwingPercent);
+    const retrace = peak.minus(currentPrice).div(peak).mul(100);
+    if (retrace.gte(swingPercent)) {
+      trackingObj[highField] = null;
+      return { execute: true, updated: true };
+    }
+
+    return { execute: false, updated: false };
+  }
+
+  // favorableDir === 'down'
+  const trough = trackingObj[lowField] != null ? new Decimal(trackingObj[lowField]) : null;
+
+  if (!trough || currentPrice.lt(trough)) {
+    trackingObj[lowField] = currentPrice.toNumber();
+    return { execute: false, updated: true };
+  }
+
+  const retrace = currentPrice.minus(trough).div(trough).mul(100);
+  if (retrace.gte(swingPercent)) {
+    trackingObj[lowField] = null;
+    return { execute: true, updated: true };
+  }
+
+  return { execute: false, updated: false };
 }
 
 /**
@@ -697,27 +754,33 @@ function shouldBuy(currentPrice, state, settings) {
           `price=${currentPrice.toNumber()} > target=${buyTarget.toNumber()}`,
       );
     }
+    // Target nie osiągnięty – wyczyść ewentualny tracking swinga
+    if (state.swingBuyLowPrice != null) {
+      state.swingBuyLowPrice = null;
+    }
     return false;
   }
 
-  // #8 Sprawdź min wahanie
-  const swingOk = meetsMinSwing(
-    new Decimal(state.currentFocusPrice),
-    currentPrice,
-    state.buyTrendCounter,
-    settings,
-    true,
+  // #8 Trailing-stop swing: kupno = cena spada (favorable=down), czekamy na cofnięcie w górę
+  const swingPercent = getSwingPercent(currentPrice, settings, true);
+  const swing = checkSwingTrailing(
+    currentPrice, state, 'swingBuyLowPrice', 'swingBuyLowPrice', swingPercent, 'down',
   );
 
   if (DEBUG_CONDITIONS) {
     console.log(
       `🔍 BUY check wallet=${wallet} order=${orderId} ` +
         `price=${currentPrice.toNumber()} focus=${state.currentFocusPrice} ` +
-        `target=${buyTarget.toNumber()} swingOk=${swingOk}`,
+        `target=${buyTarget.toNumber()} swing=${swingPercent.toNumber()}% ` +
+        `trough=${state.swingBuyLowPrice ?? '-'} execute=${swing.execute}`,
     );
   }
 
-  return swingOk;
+  if (swing.execute) {
+    state.swingBuyLowPrice = null;
+  }
+
+  return swing.execute;
 }
 
 /**
@@ -1309,7 +1372,6 @@ async function checkAndExecuteBuySells(currentPrice, state, settings) {
       executed = true;
       executedCount++;
 
-      // Przerwij jeśli osiągnięto limit (zabezpieczenie przed zbyt wieloma transakcjami w jednym cyklu)
       if (executedCount >= maxExecutionsPerCycle) {
         if (DEBUG_CONDITIONS) {
           console.log(
@@ -1632,16 +1694,17 @@ function shouldSellShort(currentPrice, state, settings) {
           `price=${currentPrice.toNumber()} < target=${sellTarget.toNumber()}`,
       );
     }
+    // Target nie osiągnięty – wyczyść tracking swinga
+    if (state.swingSellHighPrice != null) {
+      state.swingSellHighPrice = null;
+    }
     return false;
   }
 
-  // #8 Sprawdź min wahanie
-  const swingOk = meetsMinSwing(
-    new Decimal(state.currentFocusPrice),
-    currentPrice,
-    state.sellTrendCounter,
-    settings,
-    false,
+  // #8 Trailing-stop swing: short open = cena rośnie (favorable=up), czekamy na cofnięcie w dół
+  const swingPercent = getSwingPercent(currentPrice, settings, false);
+  const swing = checkSwingTrailing(
+    currentPrice, state, 'swingSellHighPrice', 'swingSellHighPrice', swingPercent, 'up',
   );
 
   if (DEBUG_CONDITIONS) {
@@ -1649,11 +1712,15 @@ function shouldSellShort(currentPrice, state, settings) {
       `🔍 SELL check wallet=${wallet} order=${orderId} ` +
         `price=${currentPrice.toNumber()} focus=${state.currentFocusPrice} ` +
         `target=${sellTarget.toNumber()} threshold=${priceThreshold || "-"} ` +
-        `swingOk=${swingOk}`,
+        `swing=${swingPercent.toNumber()}% peak=${state.swingSellHighPrice ?? '-'} execute=${swing.execute}`,
     );
   }
 
-  return swingOk;
+  if (swing.execute) {
+    state.swingSellHighPrice = null;
+  }
+
+  return swing.execute;
 }
 
 /**
@@ -2240,36 +2307,6 @@ async function checkAndExecuteSellBuybacks(currentPrice, state, settings) {
         );
       }
       continue;
-    }
-
-    // Sprawdź minimalne wahanie (swing) - dla odkupu short sprawdzamy spadek od focus (currentFocusPrice)
-    // lub od ceny sprzedaży jeśli focus nie jest dostępny
-    const swingReferencePrice =
-      state.currentFocusPrice > 0
-        ? new Decimal(state.currentFocusPrice)
-        : position.sellPrice
-          ? new Decimal(position.sellPrice)
-          : null;
-
-    if (swingReferencePrice) {
-      const swingOk = meetsMinSwing(
-        swingReferencePrice,
-        currentPrice,
-        position.trendAtBuy || 0,
-        settings,
-        true, // isBuy = true bo odkupujemy (to jest zakup)
-      );
-
-      if (!swingOk) {
-        if (DEBUG_CONDITIONS) {
-          console.log(
-            `🔍 BUYBACK skipped (min swing) wallet=${state.walletAddress} order=${state.orderId} ` +
-              `position=${position.id} referencePrice=${swingReferencePrice.toNumber()} ` +
-              `currentPrice=${currentPrice.toNumber()} target=${targetPrice.toNumber()}`,
-          );
-        }
-        continue;
-      }
     }
 
     if (DEBUG_CONDITIONS) {
