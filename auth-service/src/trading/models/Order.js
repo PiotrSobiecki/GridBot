@@ -175,6 +175,14 @@ export class Order {
     const rows = await stmt.all();
     return rows.map(r => new Order(r));
   }
+
+  static async findByIds(ids) {
+    if (!ids || ids.length === 0) return [];
+    const placeholders = ids.map(() => "?").join(",");
+    const stmt = db.prepare(`SELECT * FROM orders WHERE id IN (${placeholders})`);
+    const rows = await stmt.all(...ids);
+    return rows.map((r) => new Order(r));
+  }
 }
 
 export default Order;

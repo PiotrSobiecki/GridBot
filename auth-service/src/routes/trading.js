@@ -1,35 +1,38 @@
 import express from "express";
 import Decimal from "decimal.js";
+import jwt from "jsonwebtoken";
 import * as GridAlgorithmService from "../trading/services/GridAlgorithmService.js";
 import * as PriceFeedService from "../trading/services/PriceFeedService.js";
 import * as WalletService from "../trading/services/WalletService.js";
 import * as GridSchedulerService from "../trading/services/GridSchedulerService.js";
 import * as AsterSpotService from "../trading/services/AsterSpotService.js";
 import * as BingXService from "../trading/services/BingXService.js";
-import UserSettings from "../trading/models/UserSettings.js";
-
-/**
- * Pobiera wybraną giełdę dla użytkownika
- */
-async function getExchangeForWallet(walletAddress) {
-  if (!walletAddress) {
-    return "asterdex";
-  }
-  
-  try {
-    const settings = await UserSettings.findOne({
-      walletAddress: walletAddress.toLowerCase(),
-    });
-    
-    const exchange = settings?.exchange || "asterdex";
-    return exchange === "bingx" ? "bingx" : "asterdex";
-  } catch (e) {
-    console.warn(`⚠️ Failed to get exchange for wallet=${walletAddress}:`, e.message);
-    return "asterdex";
-  }
-}
+import { getExchangeForWallet } from "../trading/services/ExchangeConfigService.js";
 
 const router = express.Router();
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error("FATAL: JWT_SECRET environment variable is not set!");
+  if (process.env.NODE_ENV === "production") process.exit(1);
+}
+
+// Middleware autoryzacji – taki sam wzorzec jak w routes/settings.js
+const authMiddleware = (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.walletAddress = decoded.walletAddress;
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+};
 
 // Prosty cache na symbole Aster (żeby nie pytać API przy każdym żądaniu)
 let cachedAsterSymbols = null;
@@ -39,14 +42,10 @@ const ASTER_SYMBOLS_TTL_MS = 10 * 60 * 1000; // 10 minut
 /**
  * Inicjalizuje algorytm GRID dla zlecenia
  */
-router.post("/grid/init", async (req, res) => {
+router.post("/grid/init", authMiddleware, async (req, res) => {
   try {
-    const walletAddress = req.headers["x-wallet-address"];
+    const walletAddress = req.walletAddress;
     const settings = req.body;
-
-    if (!walletAddress) {
-      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
-    }
 
     console.log(
       `🚀 Initializing GRID for wallet ${walletAddress} with order ${settings.id}`
@@ -66,14 +65,10 @@ router.post("/grid/init", async (req, res) => {
 /**
  * Pobiera stan algorytmu GRID
  */
-router.get("/grid/state/:orderId", async (req, res) => {
+router.get("/grid/state/:orderId", authMiddleware, async (req, res) => {
   try {
-    const walletAddress = req.headers["x-wallet-address"];
+    const walletAddress = req.walletAddress;
     const { orderId } = req.params;
-
-    if (!walletAddress) {
-      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
-    }
 
     const state = await GridAlgorithmService.getGridState(walletAddress, orderId);
 
@@ -91,13 +86,9 @@ router.get("/grid/state/:orderId", async (req, res) => {
 /**
  * Pobiera wszystkie stany GRID dla portfela
  */
-router.get("/grid/states", async (req, res) => {
+router.get("/grid/states", authMiddleware, async (req, res) => {
   try {
-    const walletAddress = req.headers["x-wallet-address"];
-
-    if (!walletAddress) {
-      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
-    }
+    const walletAddress = req.walletAddress;
 
     const { GridState } = await import("../trading/models/GridState.js");
     const states = await GridState.findAllByWallet(walletAddress);
@@ -112,14 +103,10 @@ router.get("/grid/states", async (req, res) => {
 /**
  * Uruchamia algorytm GRID
  */
-router.post("/grid/start/:orderId", async (req, res) => {
+router.post("/grid/start/:orderId", authMiddleware, async (req, res) => {
   try {
-    const walletAddress = req.headers["x-wallet-address"];
+    const walletAddress = req.walletAddress;
     const { orderId } = req.params;
-
-    if (!walletAddress) {
-      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
-    }
 
     console.log(
       `▶️ Starting GRID for wallet ${walletAddress} order ${orderId}`
@@ -135,14 +122,10 @@ router.post("/grid/start/:orderId", async (req, res) => {
 /**
  * Zatrzymuje algorytm GRID
  */
-router.post("/grid/stop/:orderId", async (req, res) => {
+router.post("/grid/stop/:orderId", authMiddleware, async (req, res) => {
   try {
-    const walletAddress = req.headers["x-wallet-address"];
+    const walletAddress = req.walletAddress;
     const { orderId } = req.params;
-
-    if (!walletAddress) {
-      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
-    }
 
     console.log(
       `⏹️ Stopping GRID for wallet ${walletAddress} order ${orderId}`
@@ -158,14 +141,10 @@ router.post("/grid/stop/:orderId", async (req, res) => {
 /**
  * Pobiera wszystkie pozycje (OPEN i CLOSED) dla zlecenia - do wyświetlania historii
  */
-router.get("/positions/:orderId", async (req, res) => {
+router.get("/positions/:orderId", authMiddleware, async (req, res) => {
   try {
-    const walletAddress = req.headers["x-wallet-address"];
+    const walletAddress = req.walletAddress;
     const { orderId } = req.params;
-
-    if (!walletAddress) {
-      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
-    }
 
     // Zwróć wszystkie pozycje (OPEN i CLOSED) dla historii
     const positions = await GridAlgorithmService.getAllPositions(
@@ -192,14 +171,10 @@ router.get("/positions/:orderId", async (req, res) => {
 /**
  * Usuwa pozycję z historii i bazy danych
  */
-router.delete("/positions/:positionId", async (req, res) => {
+router.delete("/positions/:positionId", authMiddleware, async (req, res) => {
   try {
-    const walletAddress = req.headers["x-wallet-address"];
+    const walletAddress = req.walletAddress;
     const { positionId } = req.params;
-
-    if (!walletAddress) {
-      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
-    }
 
     const { Position } = await import("../trading/models/Position.js");
     const { GridState } = await import("../trading/models/GridState.js");
@@ -275,7 +250,7 @@ router.delete("/positions/:positionId", async (req, res) => {
 /**
  * Oblicza następny cel zakupu (preview)
  */
-router.post("/grid/calculate-buy-target", (req, res) => {
+router.post("/grid/calculate-buy-target", authMiddleware, (req, res) => {
   try {
     const { focusPrice, trend } = req.query;
     const settings = req.body;
@@ -299,7 +274,7 @@ router.post("/grid/calculate-buy-target", (req, res) => {
 /**
  * Oblicza następny cel sprzedaży (preview)
  */
-router.post("/grid/calculate-sell-target", (req, res) => {
+router.post("/grid/calculate-sell-target", authMiddleware, (req, res) => {
   try {
     const { focusPrice, trend } = req.query;
     const settings = req.body;
@@ -327,61 +302,45 @@ router.post("/grid/calculate-sell-target", (req, res) => {
 /**
  * Pobiera aktualne ceny (z wybranej giełdy użytkownika)
  */
-router.get("/prices", async (req, res) => {
+router.get("/prices", authMiddleware, async (req, res) => {
   try {
-    const walletAddress = req.headers["x-wallet-address"];
-    
-    // Jeśli podano walletAddress, pobierz ceny z jego giełdy
-    if (walletAddress) {
-      const exchange = await getExchangeForWallet(walletAddress);
-      const exchangeService = exchange === "bingx" ? BingXService : AsterSpotService;
-      
-      // Pobierz ceny bezpośrednio z API wybranej giełdy (dla BingX wymagany signed request z walletAddress)
-      const tickers = await exchangeService.fetchAllTickerPrices(walletAddress);
-      const prices = {};
-      
-      tickers.forEach((t) => {
-        if (t.symbol && t.price) {
-          prices[t.symbol] = {
-            price: t.price,
-            priceChangePercent: t.priceChangePercent ?? null,
-          };
-        }
-      });
-      
-      console.log(`📊 Prices API: fetched from ${exchange} for wallet ${walletAddress}, ${Object.keys(prices).length} symbols`);
-      return res.json(prices);
-    }
-    
-    // Fallback: użyj globalnych cen z PriceFeedService (dla kompatybilności)
-    res.json(PriceFeedService.getAllPrices());
+    const walletAddress = req.walletAddress;
+    const exchange = await getExchangeForWallet(walletAddress);
+    const exchangeService =
+      exchange === "bingx" ? BingXService : AsterSpotService;
+
+    const tickers = await exchangeService.fetchAllTickerPrices(walletAddress);
+    const prices = {};
+
+    tickers.forEach((t) => {
+      if (t.symbol && t.price) {
+        prices[t.symbol] = {
+          price: t.price,
+          priceChangePercent: t.priceChangePercent ?? null,
+        };
+      }
+    });
+
+    console.log(
+      `📊 Prices API: fetched from ${exchange} for wallet ${walletAddress}, ${Object.keys(prices).length} symbols`,
+    );
+    res.json(prices);
   } catch (error) {
     console.error("Error getting prices:", error);
-    // Fallback do PriceFeedService w przypadku błędu
-    res.json(PriceFeedService.getAllPrices());
+    res.status(500).json({ error: "Failed to get prices" });
   }
 });
 
 /**
  * Pobiera cenę dla konkretnego symbolu (z wybranej giełdy użytkownika)
  */
-router.get("/prices/:symbol", async (req, res) => {
+router.get("/prices/:symbol", authMiddleware, async (req, res) => {
   try {
     const { symbol } = req.params;
-    const walletAddress = req.headers["x-wallet-address"];
-    
-    let price;
-    let stale = true;
-    
-    if (walletAddress) {
-      // Pobierz cenę z giełdy użytkownika
-      price = await PriceFeedService.getPrice(symbol, walletAddress);
-      stale = PriceFeedService.isPriceStale(symbol);
-    } else {
-      // Fallback: użyj globalnych cen
-      price = PriceFeedService.getPriceSync(symbol);
-      stale = PriceFeedService.isPriceStale(symbol);
-    }
+    const walletAddress = req.walletAddress;
+
+    const price = await PriceFeedService.getPrice(symbol, walletAddress);
+    const stale = PriceFeedService.isPriceStale(symbol);
 
     res.json({
       symbol: symbol.toUpperCase(),
@@ -397,7 +356,7 @@ router.get("/prices/:symbol", async (req, res) => {
 /**
  * Lista symboli i par spot z AsterDex (exchangeInfo)
  */
-router.get("/aster/symbols", async (req, res) => {
+router.get("/aster/symbols", authMiddleware, async (req, res) => {
   try {
     const now = Date.now();
     if (
@@ -441,7 +400,7 @@ router.get("/aster/symbols", async (req, res) => {
 /**
  * Ręcznie ustawia cenę (dla testów/symulacji)
  */
-router.post("/prices/:symbol", (req, res) => {
+router.post("/prices/:symbol", authMiddleware, (req, res) => {
   const { symbol } = req.params;
   const { price } = req.body;
 
@@ -452,16 +411,12 @@ router.post("/prices/:symbol", (req, res) => {
 /**
  * Ręcznie wywołuje przetworzenie ceny (dla testów)
  */
-router.post("/grid/process-price/:orderId", async (req, res) => {
+router.post("/grid/process-price/:orderId", authMiddleware, async (req, res) => {
   try {
-    const walletAddress = req.headers["x-wallet-address"];
+    const walletAddress = req.walletAddress;
     const { orderId } = req.params;
     const { price } = req.query;
     const settings = req.body;
-
-    if (!walletAddress) {
-      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
-    }
 
     await GridAlgorithmService.processPrice(
       walletAddress,
@@ -485,13 +440,9 @@ router.post("/grid/process-price/:orderId", async (req, res) => {
  * Najpierw próbuje pobrać rzeczywiste salda z wybranej giełdy,
  * a jeśli się nie uda, wraca do lokalnego, symulowanego portfela.
  */
-router.get("/wallet/balances", async (req, res) => {
+router.get("/wallet/balances", authMiddleware, async (req, res) => {
   try {
-    const walletAddress = req.headers["x-wallet-address"];
-
-    if (!walletAddress) {
-      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
-    }
+    const walletAddress = req.walletAddress;
 
     // Pobierz wybraną giełdę dla tego portfela
     const exchange = await getExchangeForWallet(walletAddress);
@@ -560,14 +511,10 @@ router.get("/wallet/balances", async (req, res) => {
 /**
  * Ustawia saldo (dla testów)
  */
-router.post("/wallet/balance", (req, res) => {
+router.post("/wallet/balance", authMiddleware, (req, res) => {
   try {
-    const walletAddress = req.headers["x-wallet-address"];
+    const walletAddress = req.walletAddress;
     const { currency, balance } = req.body;
-
-    if (!walletAddress) {
-      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
-    }
 
     WalletService.setBalance(walletAddress, currency, new Decimal(balance));
     res.json({ success: true });
@@ -580,14 +527,10 @@ router.post("/wallet/balance", (req, res) => {
 /**
  * Synchronizuje salda z zewnętrznego źródła
  */
-router.post("/wallet/sync", async (req, res) => {
+router.post("/wallet/sync", authMiddleware, async (req, res) => {
   try {
-    const walletAddress = req.headers["x-wallet-address"];
+    const walletAddress = req.walletAddress;
     const balances = req.body;
-
-    if (!walletAddress) {
-      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
-    }
 
     await WalletService.syncBalances(walletAddress, balances);
     res.json({ success: true });
@@ -600,13 +543,9 @@ router.post("/wallet/sync", async (req, res) => {
 /**
  * Ręcznie odświeża portfel z wybranej giełdy
  */
-router.post("/wallet/refresh", async (req, res) => {
+router.post("/wallet/refresh", authMiddleware, async (req, res) => {
   try {
-    const walletAddress = req.headers["x-wallet-address"];
-
-    if (!walletAddress) {
-      return res.status(400).json({ error: "Missing X-Wallet-Address header" });
-    }
+    const walletAddress = req.walletAddress;
 
     // Pobierz wybraną giełdę dla tego portfela
     const exchange = await getExchangeForWallet(walletAddress);

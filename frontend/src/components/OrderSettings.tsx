@@ -48,7 +48,14 @@ export default function OrderSettings({
     setGridState,
     prices,
     gridStates,
-  } = useStore();
+  } = useStore((state) => ({
+    walletAddress: state.walletAddress,
+    setUserSettings: state.setUserSettings,
+    userSettings: state.userSettings,
+    setGridState: state.setGridState,
+    prices: state.prices,
+    gridStates: state.gridStates,
+  }));
   const [localOrder, setLocalOrder] = useState(order);
   const [expandedSections, setExpandedSections] = useState<Set<Section>>(
     new Set(["general"]),
@@ -58,15 +65,15 @@ export default function OrderSettings({
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showDeleteFinalConfirm, setShowDeleteFinalConfirm] = useState(false);
-  // Ograniczona lista dostępnych krypto BASE
-  // Docelowo: tylko BTC, ETH, BNB, ASTER
+  // Lista dostępnych krypto BASE / QUOTE – domyślnie kilka sensownych par,
+  // ale docelowo ładowana z backendu (exchangeInfo).
   const [baseAssets, setBaseAssets] = useState<string[]>([
     "BTC",
     "ETH",
     "BNB",
     "ASTER",
   ]);
-  // Na Aster spot jako stable obsługujemy tylko USDT
+  // Na Aster spot jako stable obsługujemy głównie USDT
   const [quoteAssets, setQuoteAssets] = useState<string[]>(["USDT"]);
 
   // Synchronizuj localOrder z prop order (np. przy przełączeniu zakładki)
@@ -128,24 +135,23 @@ export default function OrderSettings({
     localOrder.buy?.currency,
   ]);
 
-  // Wyłączone pobieranie z API - używamy sztywnej listy krypto
-  // useEffect(() => {
-  //   // Załaduj listę par z backendu (AsterDex)
-  //   api
-  //     .getAsterSymbols()
-  //     .then((data) => {
-  //       if (Array.isArray(data.baseAssets) && data.baseAssets.length > 0) {
-  //         setBaseAssets(data.baseAssets);
-  //       }
-  //       if (Array.isArray(data.quoteAssets) && data.quoteAssets.length > 0) {
-  //         setQuoteAssets(data.quoteAssets);
-  //       }
-  //     })
-  //     .catch((err: any) => {
-  //       console.error("Failed to load Aster symbols:", err);
-  //       toast.error("Nie udało się pobrać listy par z giełdy");
-  //     });
-  // }, []);
+  // Ładuj listę par z backendu (exchangeInfo z AsterDex) – fallback do domyślnej listy przy błędzie.
+  useEffect(() => {
+    api
+      .getAsterSymbols()
+      .then((data) => {
+        if (Array.isArray(data.baseAssets) && data.baseAssets.length > 0) {
+          setBaseAssets(data.baseAssets);
+        }
+        if (Array.isArray(data.quoteAssets) && data.quoteAssets.length > 0) {
+          setQuoteAssets(data.quoteAssets);
+        }
+      })
+      .catch((err: any) => {
+        console.error("Failed to load Aster symbols:", err);
+        toast.error("Nie udało się pobrać listy par z giełdy");
+      });
+  }, []);
 
   const toggleSection = (section: Section) => {
     const newSections = new Set(expandedSections);

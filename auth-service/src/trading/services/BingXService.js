@@ -416,7 +416,9 @@ export async function fetch24hrTicker(symbol, walletAddress = null) {
   const result = await httpRequest("/openApi/spot/v1/ticker/24hr", {
     method: "GET",
     signed: true,
-    walletAddress,
+    // Ceny 24h są globalne – używamy zawsze globalnych kluczy z .env,
+    // niezależnie od konkretnego walleta (walletAddress nie jest tu potrzebny).
+    walletAddress: null,
     query: { symbol },
   });
 
@@ -440,12 +442,68 @@ export async function fetch24hrTicker(symbol, walletAddress = null) {
 }
 
 // BingX używa formatu "BTC-USDT" (z myślnikiem), nie "BTCUSDT"
-const TICKER_SYMBOLS = [
+// Domyślna lista symboli, jeśli exchangeInfo jest niedostępne
+const DEFAULT_TICKER_SYMBOLS = [
   "ASTER-USDT",
   "BTC-USDT",
   "ETH-USDT",
   "BNB-USDT",
 ];
+
+// Cache listy symboli, żeby nie pytać exchangeInfo przy każdym odświeżeniu cen
+let cachedTickerSymbols = null;
+let cachedTickerSymbolsAt = 0;
+const TICKER_SYMBOLS_TTL_MS = 5 * 60 * 1000; // 5 minut
+
+async function getTickerSymbols() {
+  const now = Date.now();
+  if (cachedTickerSymbols && now - cachedTickerSymbolsAt < TICKER_SYMBOLS_TTL_MS) {
+    return cachedTickerSymbols;
+  }
+
+  try {
+    const info = await fetchExchangeInfo();
+    const symbols = Array.isArray(info?.symbols) ? info.symbols : [];
+
+    // Interesują nas pary z USDT jako quote
+    const usdtPairs = symbols.filter(
+      (s) => s.quoteAsset && s.quoteAsset.toUpperCase() === "USDT",
+    );
+
+    // Priorytet dla kilku kluczowych baz (ASTER, BTC, ETH, BNB) – jeśli są dostępne.
+    const priorityBases = ["ASTER", "BTC", "ETH", "BNB"];
+    const selected = [];
+    for (const base of priorityBases) {
+      const match = usdtPairs.find(
+        (s) => s.baseAsset && s.baseAsset.toUpperCase() === base,
+      );
+      if (match) {
+        // BingXService wewnętrznie używa symboli z myślnikiem, więc zamień format
+        selected.push(toBingxSymbol(match.symbol));
+      }
+    }
+
+    // Jeśli nic nie znaleźliśmy po priorytecie, weź pierwsze kilka par z USDT
+    const finalList =
+      selected.length > 0
+        ? selected
+        : usdtPairs
+            .slice(0, DEFAULT_TICKER_SYMBOLS.length)
+            .map((s) => toBingxSymbol(s.symbol));
+
+    cachedTickerSymbols = finalList;
+    cachedTickerSymbolsAt = now;
+    return finalList;
+  } catch (error) {
+    console.warn(
+      "⚠️ BingXService: failed to build ticker symbols from exchangeInfo, using defaults:",
+      error.message,
+    );
+    cachedTickerSymbols = DEFAULT_TICKER_SYMBOLS;
+    cachedTickerSymbolsAt = now;
+    return DEFAULT_TICKER_SYMBOLS;
+  }
+}
 
 /**
  * Zwraca ceny tylko dla wybranych kryptowalut.
@@ -454,10 +512,13 @@ const TICKER_SYMBOLS = [
  */
 export async function fetchAllTickerPrices(walletAddress = null) {
   try {
-    console.log(`📡 BingX: Starting to fetch prices for ${TICKER_SYMBOLS.length} symbols (signed)`);
+    // Ustal listę symboli na podstawie exchangeInfo (z cache), z fallbackiem do domyślnej listy.
+    const tickerSymbols = await getTickerSymbols();
+
+    console.log(`📡 BingX: Starting to fetch prices for ${tickerSymbols.length} symbols (signed)`);
     const prices = [];
 
-    const batchPromises = TICKER_SYMBOLS.map(async (symbol) => {
+    const batchPromises = tickerSymbols.map(async (symbol) => {
       try {
         const ticker24hr = await fetch24hrTicker(symbol, walletAddress);
         
@@ -495,12 +556,12 @@ export async function fetchAllTickerPrices(walletAddress = null) {
     });
 
     console.log(
-      `✅ Pobrano ${prices.length}/${TICKER_SYMBOLS.length} cen z BingX API`
+      `✅ Pobrano ${prices.length}/${tickerSymbols.length} cen z BingX API`
     );
     
     if (prices.length === 0) {
       console.error(`❌ BingX: No prices fetched! Check API endpoints and response format.`);
-      console.error(`❌ BingX: Tried symbols: ${TICKER_SYMBOLS.join(", ")}`);
+      console.error(`❌ BingX: Tried symbols: ${tickerSymbols.join(", ")}`);
     }
     
     return prices;

@@ -2,14 +2,19 @@ import crypto from "crypto";
 
 // 32‑bajtowy klucz w HEX, z .env: API_ENCRYPTION_KEY=...
 const RAW_KEY = (process.env.API_ENCRYPTION_KEY || "").trim();
+const IS_PROD = process.env.NODE_ENV === "production";
 
 let ENC_KEY = null;
 if (RAW_KEY && RAW_KEY.length === 64) {
   ENC_KEY = Buffer.from(RAW_KEY, "hex");
 } else {
-  console.warn(
-    "⚠️ CryptoService: API_ENCRYPTION_KEY not set or invalid length – API keys will be stored in PLAIN TEXT (DEV only)."
-  );
+  const msg =
+    "⚠️ CryptoService: API_ENCRYPTION_KEY not set or invalid length – API keys CANNOT be safely encrypted.";
+  if (IS_PROD) {
+    console.error(msg);
+  } else {
+    console.warn(`${msg} Falling back to PLAINTEXT in non-production.`);
+  }
 }
 
 const IV_LENGTH = 16; // AES‑256‑CBC
@@ -17,6 +22,11 @@ const IV_LENGTH = 16; // AES‑256‑CBC
 export function encrypt(value) {
   if (!value) return null;
   if (!ENC_KEY) {
+    if (IS_PROD) {
+      throw new Error(
+        "CryptoService: API_ENCRYPTION_KEY is not configured – refusing to store sensitive data in plaintext in production.",
+      );
+    }
     // DEV fallback – bez szyfrowania
     return value;
   }
@@ -30,6 +40,11 @@ export function encrypt(value) {
 export function decrypt(encValue) {
   if (!encValue) return null;
   if (!ENC_KEY) {
+    if (IS_PROD) {
+      throw new Error(
+        "CryptoService: API_ENCRYPTION_KEY is not configured – cannot decrypt values in production.",
+      );
+    }
     // DEV fallback – bez szyfrowania
     return encValue;
   }

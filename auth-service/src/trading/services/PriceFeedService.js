@@ -3,6 +3,7 @@ import Decimal from "decimal.js";
 import * as AsterSpotService from "./AsterSpotService.js";
 import * as BingXService from "./BingXService.js";
 import UserSettings from "../models/UserSettings.js";
+import { getExchangeForWallet } from "./ExchangeConfigService.js";
 
 /**
  * Serwis do pobierania cen w czasie rzeczywistym
@@ -11,8 +12,7 @@ import UserSettings from "../models/UserSettings.js";
 
 // Tryb symulacji: włączony tylko gdy SIMULATION_MODE === "true"
 // Domyślnie (brak zmiennej) = FAŁSZ => używamy prawdziwych cen
-const SIMULATION_MODE = process.env.SIMULATION_MODE === "false";
-const USE_ASTER_SPOT = process.env.USE_ASTER_SPOT === "true";
+const SIMULATION_MODE = process.env.SIMULATION_MODE === "true";
 
 // Aktualne ceny per giełda: exchange -> Map<symbol, price>
 const currentPricesByExchange = new Map(); // exchange -> Map<symbol, price>
@@ -105,29 +105,6 @@ function startSimulation() {
 }
 
 /**
- * Pobiera wybraną giełdę dla użytkownika (domyślnie "asterdex")
- * @param {string} walletAddress - adres portfela
- * @returns {Promise<"asterdex"|"bingx">}
- */
-async function getExchange(walletAddress) {
-  if (!walletAddress) {
-    return "asterdex"; // Domyślnie AsterDex
-  }
-  
-  try {
-    const settings = await UserSettings.findOne({
-      walletAddress: walletAddress.toLowerCase(),
-    });
-    
-    const exchange = settings?.exchange || "asterdex";
-    return exchange === "bingx" ? "bingx" : "asterdex";
-  } catch (e) {
-    console.warn(`⚠️ Failed to get exchange for wallet=${walletAddress}:`, e.message);
-    return "asterdex";
-  }
-}
-
-/**
  * Odświeża ceny z wybranej giełdy (eksportowane – wywoływane z GridSchedulerService przy każdym cyku).
  * @param {string} walletAddress - adres portfela (do określenia giełdy)
  * @param {string} exchange - opcjonalna giełda ("asterdex" lub "bingx"), ma priorytet nad UserSettings.exchange
@@ -138,22 +115,33 @@ export async function refreshFromAster(walletAddress = null, exchange = null) {
 
 async function _refreshFromExchange(walletAddress = null, forcedExchange = null) {
   try {
-    if (!walletAddress) {
-      console.warn(`⚠️ refreshFromExchange called without walletAddress - skipping`);
+    // Jeśli nie podano ani walletAddress, ani wymuszonej giełdy – nic nie rób
+    if (!walletAddress && !forcedExchange) {
+      console.warn(
+        `⚠️ refreshFromExchange called without walletAddress and exchange - skipping`,
+      );
       return;
     }
-    
-    // Jeśli podano forcedExchange, użyj go (z zlecenia), w przeciwnym razie pobierz z UserSettings
+
+    // Jeśli podano forcedExchange, użyj go (globalny fetch); w przeciwnym razie pobierz z UserSettings
     let exchange = forcedExchange;
     if (!exchange) {
-      exchange = await getExchange(walletAddress);
+      exchange = await getExchangeForWallet(walletAddress);
     }
     
-    const exchangeService = exchange === "bingx" ? BingXService : AsterSpotService;
+    const exchangeService =
+      exchange === "bingx" ? BingXService : AsterSpotService;
     const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
-    
-    console.log(`📡 Fetching prices from ${exchangeName} API (wallet: ${walletAddress}, exchange: ${exchange}${forcedExchange ? " [from order]" : " [from UserSettings]"})`);
-    
+
+    console.log(
+      `📡 Fetching prices from ${exchangeName} API (wallet: ${
+        walletAddress || "-"
+      }, exchange: ${exchange}${
+        forcedExchange ? " [forced]" : " [from UserSettings]"
+      })`,
+    );
+
+    // Dla globalnego fetchu (walletAddress=null) BingX użyje kluczy z .env (getApiKeys(null))
     const tickers = await exchangeService.fetchAllTickerPrices(walletAddress);
     const now = Date.now();
 
@@ -222,7 +210,7 @@ async function _refreshFromExchange(walletAddress = null, forcedExchange = null)
       }
     }
   } catch (error) {
-    const exchange = await getExchange(walletAddress);
+    const exchange = await getExchangeForWallet(walletAddress);
     const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
     console.error(
       `❌ Failed to refresh prices from ${exchangeName}:`,
@@ -270,7 +258,7 @@ function broadcastPrice(symbol, price) {
 export async function getPrice(symbol, walletAddress = null) {
   if (walletAddress) {
     try {
-      const exchange = await getExchange(walletAddress);
+      const exchange = await getExchangeForWallet(walletAddress);
       const exchangePrices = currentPricesByExchange.get(exchange);
       if (exchangePrices) {
         const price = exchangePrices.get(symbol.toUpperCase());

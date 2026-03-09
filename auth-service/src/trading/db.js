@@ -58,9 +58,18 @@ if (usePostgres) {
   // Dla Postgres musimy użyć async, więc stworzymy wrapper
   const pgModule = await import('pg');
   const { Pool } = pgModule.default || pgModule;
+  const isLocal = DATABASE_URL.includes('localhost');
+  // Domyślnie: w produkcji włączone pełne sprawdzanie certyfikatu.
+  // Można je świadomie obniżyć ustawiając PG_SSL_INSECURE="true" (np. przy niestandardowych certyfikatach).
+  const ssl = isLocal
+    ? false
+    : process.env.PG_SSL_INSECURE === "true"
+      ? { rejectUnauthorized: false }
+      : { rejectUnauthorized: true };
+
   const pool = new Pool({
     connectionString: DATABASE_URL,
-    ssl: DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false },
+    ssl,
   });
 
   // Inicjalizuj tabele w Postgresie

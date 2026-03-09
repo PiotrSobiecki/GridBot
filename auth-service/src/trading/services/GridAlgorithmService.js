@@ -6,6 +6,7 @@ import { GridState } from "../models/GridState.js";
 import { Position, PositionStatus, PositionType } from "../models/Position.js";
 import * as WalletService from "./WalletService.js";
 import * as ExchangeService from "./ExchangeService.js";
+import { getSwingPercent, checkSwingTrailing } from "./SwingService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -635,112 +636,7 @@ function checkFeeDoesNotEatProfit(buyValue, expectedProfit, settings) {
   return totalFee.lt(expectedProfit);
 }
 
-/**
- * #8 Pobiera procent wahania dla zakresu cen
- */
-function getSwingPercent(currentPrice, settings, isBuy) {
-  const swingPercents = isBuy
-    ? settings.buySwingPercent
-    : settings.sellSwingPercent;
-
-  if (!swingPercents || swingPercents.length === 0) {
-    return new Decimal(0);
-  }
-
-  const price = new Decimal(currentPrice);
-
-  for (const sp of swingPercents) {
-    // Sprawdź zakres cen: minPrice <= cena < maxPrice
-    if (sp.minPrice != null && price.lt(new Decimal(sp.minPrice))) {
-      continue;
-    }
-    if (sp.maxPrice != null && price.gte(new Decimal(sp.maxPrice))) {
-      continue;
-    }
-    return new Decimal(sp.value || 0);
-  }
-
-  return new Decimal(0);
-}
-
-/**
- * #8 Trailing-stop swing check.
- *
- * Mechanizm:
- *   1. Gdy target zostanie osiągnięty, bot NIE realizuje od razu – zaczyna śledzić
- *      najkorzystniejszą cenę (peak/trough).
- *   2. Realizacja następuje dopiero gdy cena cofnie się od peak/trough o >= swing%.
- *
- * @param {Decimal}  currentPrice   – aktualna cena
- * @param {object}   trackingObj    – obiekt z polami swingHighPrice / swingLowPrice (Position lub GridState)
- * @param {string}   highField      – nazwa pola peak  (np. 'swingHighPrice' / 'swingSellHighPrice')
- * @param {string}   lowField       – nazwa pola trough (np. 'swingLowPrice'  / 'swingBuyLowPrice')
- * @param {Decimal}  swingPercent   – wymagane cofnięcie w %
- * @param {'up'|'down'} favorableDir – kierunek korzystny ('up' = sprzedaż/short open, 'down' = kupno/buyback)
- * @returns {{ execute: boolean, updated: boolean }}
- *    execute – true = cofnięcie wystarczające, realizuj transakcję
- *    updated – true = peak/trough został zaktualizowany (trzeba zapisać obiekt)
- */
-function checkSwingTrailing(currentPrice, trackingObj, highField, lowField, swingPercent, favorableDir) {
-  if (swingPercent.eq(0)) return { execute: true, updated: false };
-
-  if (favorableDir === 'up') {
-    const peak = trackingObj[highField] != null ? new Decimal(trackingObj[highField]) : null;
-
-    // Aktualizacja/ustawienie szczytu (peak)
-    if (!peak || currentPrice.gt(peak)) {
-      if (DEBUG_CONDITIONS) {
-        const prev = peak ? peak.toNumber() : null;
-        console.log(
-          `🔍 SWING track(up) ${highField}: prevPeak=${prev ?? "-"} newPeak=${currentPrice.toNumber()}`,
-        );
-      }
-    trackingObj[highField] = currentPrice.toNumber();
-      return { execute: false, updated: true };
-    }
-
-    const retrace = peak.minus(currentPrice).div(peak).mul(100);
-    if (retrace.gte(swingPercent)) {
-      if (DEBUG_CONDITIONS) {
-        console.log(
-          `✅ SWING exec(up) ${highField}: peak=${peak.toNumber()} current=${currentPrice.toNumber()} retrace=${retrace.toDecimalPlaces(4).toString()}% swing=${swingPercent.toString()}%`,
-        );
-      }
-      trackingObj[highField] = null;
-      return { execute: true, updated: true };
-    }
-
-    return { execute: false, updated: false };
-  }
-
-  // favorableDir === 'down'
-  const trough = trackingObj[lowField] != null ? new Decimal(trackingObj[lowField]) : null;
-
-  // Aktualizacja/ustawienie dołka (trough)
-  if (!trough || currentPrice.lt(trough)) {
-    if (DEBUG_CONDITIONS) {
-      const prev = trough ? trough.toNumber() : null;
-      console.log(
-        `🔍 SWING track(down) ${lowField}: prevTrough=${prev ?? "-"} newTrough=${currentPrice.toNumber()}`,
-      );
-    }
-    trackingObj[lowField] = currentPrice.toNumber();
-    return { execute: false, updated: true };
-  }
-
-  const retrace = currentPrice.minus(trough).div(trough).mul(100);
-  if (retrace.gte(swingPercent)) {
-    if (DEBUG_CONDITIONS) {
-      console.log(
-        `✅ SWING exec(down) ${lowField}: trough=${trough.toNumber()} current=${currentPrice.toNumber()} retrace=${retrace.toDecimalPlaces(4).toString()}% swing=${swingPercent.toString()}%`,
-      );
-    }
-    trackingObj[lowField] = null;
-    return { execute: true, updated: true };
-  }
-
-  return { execute: false, updated: false };
-}
+// #8 Logika swinga jest zaimplementowana w osobnym SwingService (getSwingPercent, checkSwingTrailing)
 
 /**
  * Sprawdza czy spełnione są warunki zakupu
@@ -788,7 +684,13 @@ function shouldBuy(currentPrice, state, settings) {
   // #8 Trailing-stop swing: kupno = cena spada (favorable=down), czekamy na cofnięcie w górę
   const swingPercent = getSwingPercent(currentPrice, settings, true);
   const swing = checkSwingTrailing(
-    currentPrice, state, 'swingBuyLowPrice', 'swingBuyLowPrice', swingPercent, 'down',
+    currentPrice,
+    state,
+    "swingBuyLowPrice",
+    "swingBuyLowPrice",
+    swingPercent,
+    "down",
+    DEBUG_CONDITIONS,
   );
 
   if (DEBUG_CONDITIONS) {
@@ -1728,7 +1630,13 @@ function shouldSellShort(currentPrice, state, settings) {
   // #8 Trailing-stop swing: short open = cena rośnie (favorable=up), czekamy na cofnięcie w dół
   const swingPercent = getSwingPercent(currentPrice, settings, false);
   const swing = checkSwingTrailing(
-    currentPrice, state, 'swingSellHighPrice', 'swingSellHighPrice', swingPercent, 'up',
+    currentPrice,
+    state,
+    "swingSellHighPrice",
+    "swingSellHighPrice",
+    swingPercent,
+    "up",
+    DEBUG_CONDITIONS,
   );
 
   if (DEBUG_CONDITIONS) {

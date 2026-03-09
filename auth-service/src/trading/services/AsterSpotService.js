@@ -230,13 +230,65 @@ export async function fetchSpotTickerPrice(symbol) {
   };
 }
 
-// Tylko te krypto pobieramy z API (zgodne z frontem: pasek + wybór BASE)
-const TICKER_SYMBOLS = [
+// Domyślna lista symboli jeśli exchangeInfo jest niedostępne
+const DEFAULT_TICKER_SYMBOLS = [
   "ASTERUSDT",
   "BTCUSDT",
   "ETHUSDT",
   "BNBUSDT",
 ];
+
+// Cache listy symboli, żeby nie pytać exchangeInfo przy każdym odświeżeniu cen
+let cachedTickerSymbols = null;
+let cachedTickerSymbolsAt = 0;
+const TICKER_SYMBOLS_TTL_MS = 5 * 60 * 1000; // 5 minut
+
+async function getTickerSymbols() {
+  const now = Date.now();
+  if (cachedTickerSymbols && now - cachedTickerSymbolsAt < TICKER_SYMBOLS_TTL_MS) {
+    return cachedTickerSymbols;
+  }
+
+  try {
+    const info = await fetchExchangeInfo();
+    const symbols = Array.isArray(info?.symbols) ? info.symbols : [];
+
+    // Interesują nas pary z USDT jako quote
+    const usdtPairs = symbols.filter(
+      (s) => s.quoteAsset && s.quoteAsset.toUpperCase() === "USDT",
+    );
+
+    // Priorytet dla kilku kluczowych baz (ASTER, BTC, ETH, BNB) – jeśli są dostępne.
+    const priorityBases = ["ASTER", "BTC", "ETH", "BNB"];
+    const selected = [];
+    for (const base of priorityBases) {
+      const match = usdtPairs.find(
+        (s) => s.baseAsset && s.baseAsset.toUpperCase() === base,
+      );
+      if (match) {
+        selected.push(match.symbol);
+      }
+    }
+
+    // Jeśli nic nie znaleźliśmy po priorytecie, weź pierwsze kilka par z USDT
+    const finalList =
+      selected.length > 0
+        ? selected
+        : usdtPairs.slice(0, DEFAULT_TICKER_SYMBOLS.length).map((s) => s.symbol);
+
+    cachedTickerSymbols = finalList;
+    cachedTickerSymbolsAt = now;
+    return finalList;
+  } catch (error) {
+    console.warn(
+      "⚠️ AsterSpotService: failed to build ticker symbols from exchangeInfo, using defaults:",
+      error.message,
+    );
+    cachedTickerSymbols = DEFAULT_TICKER_SYMBOLS;
+    cachedTickerSymbolsAt = now;
+    return DEFAULT_TICKER_SYMBOLS;
+  }
+}
 
 /**
  * Zwraca ceny tylko dla wybranych kryptowalut.
@@ -247,8 +299,11 @@ export async function fetchAllTickerPrices() {
   try {
     const prices = [];
 
+    // Ustal listę symboli na podstawie exchangeInfo (z cache), z fallbackiem do domyślnej listy.
+    const tickerSymbols = await getTickerSymbols();
+
     // Pobierz ceny ze Spot API i zmiany z Futures API równolegle
-    const batchPromises = TICKER_SYMBOLS.map(async (symbol) => {
+    const batchPromises = tickerSymbols.map(async (symbol) => {
       try {
         // Pobierz cenę ze Spot API
         const spotTicker = await fetchSpotTickerPrice(symbol);
@@ -305,7 +360,7 @@ export async function fetchAllTickerPrices() {
     });
 
     console.log(
-      `✅ Pobrano ${prices.length}/${TICKER_SYMBOLS.length} cen (Spot API) + zmiany (Futures API)`
+      `✅ Pobrano ${prices.length}/${tickerSymbols.length} cen (Spot API) + zmiany (Futures API)`
     );
     return prices;
   } catch (error) {

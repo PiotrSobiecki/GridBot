@@ -4,7 +4,11 @@ import { useStore } from "../store/useStore";
 import { api } from "../api";
 
 export default function PriceDisplay() {
-  const { prices, userSettings, activeOrderIndex, updatePrice, walletAddress } = useStore();
+  const { prices, userSettings, activeOrderIndex } = useStore((state) => ({
+    prices: state.prices,
+    userSettings: state.userSettings,
+    activeOrderIndex: state.activeOrderIndex,
+  }));
 
   const orders = userSettings?.orders || [];
   const activeOrder = orders[activeOrderIndex] ?? orders[0];
@@ -16,52 +20,28 @@ export default function PriceDisplay() {
     intervals.length > 0 ? Math.min(...intervals) : 5;
   const refreshIntervalMs = refreshIntervalSec * 1000;
 
-  // Sztywna lista krypto do wyświetlenia na pasku (zawsze pokazujemy te, nawet jeśli brak cen)
-  const DISPLAYED_CRYPTOS = ["ASTER", "BTC", "ETH", "BNB"];
-  const [baseAssets] = useState<string[]>(DISPLAYED_CRYPTOS);
+  // Lista krypto do wyświetlenia na pasku – domyślnie kilka popularnych,
+  // ale docelowo ładowana z backendu (exchangeInfo).
+  const [baseAssets, setBaseAssets] = useState<string[]>([
+    "ASTER",
+    "BTC",
+    "ETH",
+    "BNB",
+  ]);
 
-  // Pobieraj ceny z backendu w tym samym interwale co odświeżanie / sprawdzanie na stronie
+  // Pobierz listę dostępnych BASE/QUOTE z backendu (exchangeInfo z AsterDex)
   useEffect(() => {
-    const loadPrices = () => {
-      api
-        .getPrices()
-        .then((allPrices: Record<string, any>) => {
-          // Backend zwraca teraz obiekty: { price: "...", priceChangePercent: ... }
-          Object.entries(allPrices).forEach(([symbol, data]) => {
-            let numPrice: number;
-            let changePercent: number | null = null;
-
-            if (typeof data === "object" && data !== null && "price" in data) {
-              // Nowy format: { price: "...", priceChangePercent: ... }
-              numPrice =
-                typeof data.price === "string"
-                  ? parseFloat(data.price)
-                  : Number(data.price);
-              changePercent =
-                data.priceChangePercent != null
-                  ? Number(data.priceChangePercent)
-                  : null;
-            } else {
-              // Stary format (fallback): sam string/number
-              numPrice =
-                typeof data === "string" ? parseFloat(data) : Number(data);
-            }
-
-            if (!isNaN(numPrice) && numPrice > 0) {
-              updatePrice(symbol, numPrice, changePercent);
-            }
-          });
-        })
-        .catch((err) => {
-          console.error("❌ Failed to load prices:", err);
-        });
-    };
-
-    loadPrices();
-    const intervalId = setInterval(loadPrices, refreshIntervalMs);
-
-    return () => clearInterval(intervalId);
-  }, [updatePrice, refreshIntervalMs, walletAddress]);
+    api
+      .getAsterSymbols()
+      .then((data: any) => {
+        if (Array.isArray(data.baseAssets) && data.baseAssets.length > 0) {
+          setBaseAssets(data.baseAssets);
+        }
+      })
+      .catch((err) => {
+        console.error("❌ Failed to load Aster symbols for price ticker:", err);
+      });
+  }, []);
 
   const formatPrice = (symbol: string, price: number | string) => {
     const numPrice = typeof price === "string" ? parseFloat(price) : price;

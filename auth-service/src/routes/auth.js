@@ -6,7 +6,11 @@ import User from '../trading/models/User.js';
 import UserSettings from '../trading/models/UserSettings.js';
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'gridbot-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error("FATAL: JWT_SECRET environment variable is not set!");
+  if (process.env.NODE_ENV === "production") process.exit(1);
+}
 
 // Generuj nonce dla SIWE
 router.get('/nonce', async (req, res) => {

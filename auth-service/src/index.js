@@ -99,7 +99,7 @@ const sessionStore = setupSessionStore();
 app.use(
   session({
     store: sessionStore,
-    secret: process.env.JWT_SECRET || "gridbot-secret-key",
+    secret: process.env.JWT_SECRET || "dev-session-key-change-in-production",
     resave: false,
     saveUninitialized: false,
     cookie: {

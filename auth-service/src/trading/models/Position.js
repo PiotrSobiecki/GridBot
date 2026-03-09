@@ -89,9 +89,15 @@ export class Position {
   }
 
   static async findByWalletAndOrderId(walletAddress, orderId, status = null) {
-    let query = 'SELECT * FROM positions WHERE wallet_address = ? AND order_id = ?';
-    const params = [walletAddress, orderId];
-    
+    let query = 'SELECT * FROM positions WHERE wallet_address = ?';
+    const params = [walletAddress];
+
+    // Jeśli podano orderId, filtruj po nim; jeśli null, zwróć wszystkie zlecenia danego portfela.
+    if (orderId != null) {
+      query += ' AND order_id = ?';
+      params.push(orderId);
+    }
+
     if (status) {
       query += ' AND status = ?';
       params.push(status);

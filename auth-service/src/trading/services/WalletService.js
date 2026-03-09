@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { getExchangeForWallet } from "./ExchangeConfigService.js";
 
 /**
  * Serwis do zarządzania portfelem użytkownika
@@ -21,28 +22,6 @@ const DEFAULT_BALANCES = {
 };
 
 /**
- * Pobiera wybraną giełdę dla portfela (domyślnie "asterdex")
- */
-async function getExchange(walletAddress) {
-  if (!walletAddress) {
-    return "asterdex";
-  }
-  
-  try {
-    const { default: UserSettings } = await import("../models/UserSettings.js");
-    const settings = await UserSettings.findOne({
-      walletAddress: walletAddress.toLowerCase(),
-    });
-    
-    const exchange = settings?.exchange || "asterdex";
-    return exchange === "bingx" ? "bingx" : "asterdex";
-  } catch (e) {
-    console.warn(`⚠️ Failed to get exchange for wallet=${walletAddress}:`, e.message);
-    return "asterdex";
-  }
-}
-
-/**
  * Pobiera saldo dla danej waluty z wybranej giełdy
  */
 export async function getBalance(walletAddress, currency, exchange = null) {
@@ -51,7 +30,7 @@ export async function getBalance(walletAddress, currency, exchange = null) {
   
   // Jeśli exchange nie podano, pobierz z ustawień użytkownika
   if (!exchange) {
-    exchange = await getExchange(walletAddress);
+    exchange = await getExchangeForWallet(walletAddress);
   }
   
   if (!walletBalances.has(wallet)) {
@@ -105,7 +84,7 @@ export async function setBalance(walletAddress, currency, balance, exchange = nu
   
   // Jeśli exchange nie podano, pobierz z ustawień użytkownika
   if (!exchange) {
-    exchange = await getExchange(walletAddress);
+    exchange = await getExchangeForWallet(walletAddress);
   }
   
   if (!walletBalances.has(wallet)) {
@@ -148,7 +127,7 @@ export async function getAllBalances(walletAddress, exchange = null) {
   
   // Jeśli exchange nie podano, pobierz z ustawień użytkownika
   if (!exchange) {
-    exchange = await getExchange(walletAddress);
+    exchange = await getExchangeForWallet(walletAddress);
   }
   
   if (!walletBalances.has(wallet)) {
@@ -295,7 +274,7 @@ export async function syncBalances(walletAddress, externalBalances, exchange = n
   
   // Jeśli exchange nie podano, pobierz z ustawień użytkownika
   if (!exchange) {
-    exchange = await getExchange(walletAddress);
+    exchange = await getExchangeForWallet(walletAddress);
   }
   
   if (!walletBalances.has(wallet)) {

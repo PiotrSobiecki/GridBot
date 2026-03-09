@@ -8,7 +8,11 @@ import * as GridAlgorithmService from "../trading/services/GridAlgorithmService.
 import { encrypt, decrypt } from "../trading/services/CryptoService.js";
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || "gridbot-secret-key";
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error("FATAL: JWT_SECRET environment variable is not set!");
+  if (process.env.NODE_ENV === "production") process.exit(1);
+}
 
 // Helper – normalizuje strukturę zleceń tak, żeby frontend miał zawsze _id
 const normalizeOrders = (orders = []) =>
@@ -17,6 +21,52 @@ const normalizeOrders = (orders = []) =>
     _id: o._id || o.id,
     id:  o.id  || o._id,
   }));
+
+// Prosta walidacja payloadu zlecenia – dba o typy i podstawowe zakresy.
+function validateOrderPayload(raw = {}) {
+  const errors = [];
+  const order = { ...raw };
+
+  const toNumberField = (obj, field, { min = null } = {}) => {
+    if (obj[field] == null || obj[field] === "") return;
+    const n = Number(obj[field]);
+    if (!Number.isFinite(n)) {
+      errors.push(`Field "${field}" must be a number`);
+      return;
+    }
+    if (min != null && n < min) {
+      errors.push(`Field "${field}" must be >= ${min}`);
+      return;
+    }
+    obj[field] = n;
+  };
+
+  // Podstawowe pola liczbowe na poziomie zamówienia
+  toNumberField(order, "refreshInterval", { min: 1 });
+  toNumberField(order, "minProfitPercent", { min: 0 });
+  toNumberField(order, "focusPrice", { min: 0 });
+  toNumberField(order, "timeToNewFocus", { min: 0 });
+
+  // Zagnieżdżone struktury – zabezpiecz przed dziwnymi typami
+  order.buyConditions = order.buyConditions || {};
+  order.sellConditions = order.sellConditions || {};
+  toNumberField(order.buyConditions, "minValuePer1Percent", { min: 0 });
+  toNumberField(order.buyConditions, "priceThreshold", { min: 0 });
+  toNumberField(order.sellConditions, "minValuePer1Percent", { min: 0 });
+  toNumberField(order.sellConditions, "priceThreshold", { min: 0 });
+
+  // tradeMode tylko z dozwolonych wartości
+  if (order.tradeMode != null) {
+    const allowedModes = ["both", "buyOnly", "sellOnly"];
+    if (!allowedModes.includes(order.tradeMode)) {
+      errors.push(
+        `Field "tradeMode" must be one of: ${allowedModes.join(", ")}`,
+      );
+    }
+  }
+
+  return { order, errors };
+}
 
 // Middleware autoryzacji
 const authMiddleware = (req, res, next) => {
@@ -257,11 +307,16 @@ router.post("/orders", authMiddleware, async (req, res) => {
     const settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
     const currentExchange = settings?.exchange || "asterdex";
 
+    const { order: validatedOrder, errors } = validateOrderPayload(req.body || {});
+    if (errors.length > 0) {
+      return res.status(400).json({ error: "Invalid order payload", details: errors });
+    }
+
     const order = new Order({
-      ...req.body,
-      id: req.body.id || req.body._id || uuidv4(),
+      ...validatedOrder,
+      id: validatedOrder.id || validatedOrder._id || uuidv4(),
       walletAddress: req.walletAddress,
-      exchange: req.body.exchange || currentExchange,
+      exchange: validatedOrder.exchange || currentExchange,
     });
 
     await order.save();
@@ -276,11 +331,22 @@ router.post("/orders", authMiddleware, async (req, res) => {
 router.put("/orders/:orderId", authMiddleware, async (req, res) => {
   try {
     const { orderId } = req.params;
-    const updateData = req.body;
+    const { order: updateData, errors } = validateOrderPayload(req.body || {});
+    if (errors.length > 0) {
+      return res.status(400).json({ error: "Invalid order payload", details: errors });
+    }
 
     const existingOrder = await Order.findById(orderId);
     if (!existingOrder) {
       return res.status(404).json({ error: "Order not found" });
+    }
+
+    // Zabezpieczenie: zlecenie musi należeć do zalogowanego portfela
+    if (
+      existingOrder.walletAddress?.toLowerCase() !==
+      req.walletAddress.toLowerCase()
+    ) {
+      return res.status(403).json({ error: "Forbidden" });
     }
 
     // Logika Focus:
@@ -339,18 +405,68 @@ router.delete("/orders/:orderId", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    await order.delete();
+    // Zabezpieczenie: zlecenie musi należeć do zalogowanego portfela
+    if (
+      order.walletAddress?.toLowerCase() !== req.walletAddress.toLowerCase()
+    ) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
 
-    // Wyczyść powiązany GRID state + pozycje
+    // Usuń zlecenie + powiązany GRID state + pozycje w jednej transakcji DB
     try {
       const lowerWallet = req.walletAddress.toLowerCase();
       const dbModule = await import("../trading/db.js");
       const db = dbModule.default;
-      await db.prepare("DELETE FROM grid_states WHERE wallet_address = ? AND order_id = ?").run(lowerWallet, orderId);
-      await db.prepare("DELETE FROM positions  WHERE wallet_address = ? AND order_id = ?").run(lowerWallet, orderId);
-      console.log(`🧹 Deleted GRID state and positions for order=${orderId}`);
+
+      if (db._isAsync && db.pool) {
+        // Postgres – użyj pojedynczego klienta i BEGIN/COMMIT
+        const client = await db.pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("DELETE FROM orders WHERE id = $1", [orderId]);
+          await client.query(
+            "DELETE FROM grid_states WHERE wallet_address = $1 AND order_id = $2",
+            [lowerWallet, orderId],
+          );
+          await client.query(
+            "DELETE FROM positions WHERE wallet_address = $1 AND order_id = $2",
+            [lowerWallet, orderId],
+          );
+          await client.query("COMMIT");
+          console.log(
+            `🧹 Deleted order, GRID state and positions in one transaction for order=${orderId}`,
+          );
+        } catch (txError) {
+          await client.query("ROLLBACK");
+          console.error(
+            "⚠️ Transaction rollback when deleting order:",
+            txError.message,
+          );
+          throw txError;
+        } finally {
+          client.release();
+        }
+      } else {
+        // SQLite – prosty BEGIN/COMMIT w jednym ciągu SQL
+        const safeOrderId = String(orderId).replace(/'/g, "''");
+        const safeWallet = String(lowerWallet).replace(/'/g, "''");
+        await db.exec(`
+          BEGIN;
+          DELETE FROM orders WHERE id = '${safeOrderId}';
+          DELETE FROM grid_states WHERE wallet_address = '${safeWallet}' AND order_id = '${safeOrderId}';
+          DELETE FROM positions  WHERE wallet_address = '${safeWallet}' AND order_id = '${safeOrderId}';
+          COMMIT;
+        `);
+        console.log(
+          `🧹 Deleted order, GRID state and positions in one transaction for order=${orderId}`,
+        );
+      }
     } catch (cleanupError) {
-      console.error("⚠️ Failed to cleanup GRID state/positions:", cleanupError.message);
+      console.error(
+        "⚠️ Failed to delete order and cleanup GRID state/positions:",
+        cleanupError.message,
+      );
+      throw cleanupError;
     }
 
     res.json({ success: true });

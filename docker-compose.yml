@@ -23,25 +23,10 @@ services:
     environment:
       - NODE_ENV=production
       - JWT_SECRET=your-super-secret-jwt-key-change-in-production
-      - MONGODB_URI=mongodb://mongodb:27017/gridbot
       - CORS_ORIGIN=http://localhost:5173
-    depends_on:
-      - mongodb
-    networks:
-      - gridbot-network
-
-  mongodb:
-    image: mongo:7
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongodb_data:/data/db
     networks:
       - gridbot-network
 
 networks:
   gridbot-network:
     driver: bridge
-
-volumes:
-  mongodb_data:

@@ -1,37 +1,6 @@
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 
-// Initialize user_settings table (SQLite) lub Postgres (db.exec jest async/sync-aware)
-(async () => {
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS user_settings (
-      id TEXT PRIMARY KEY,
-      wallet_address TEXT UNIQUE NOT NULL,
-      wallet_currencies TEXT DEFAULT '[]',
-      orders TEXT DEFAULT '[]',
-      api_config TEXT DEFAULT '{}',
-      created_at TEXT,
-      updated_at TEXT
-    );
-    
-    CREATE INDEX IF NOT EXISTS idx_user_settings_wallet ON user_settings(wallet_address);
-  `);
-
-  // Best-effort migration: dodaj kolumnę api_config jeśli jej brakuje (dla starych baz)
-  try {
-    await db.exec("ALTER TABLE user_settings ADD COLUMN api_config TEXT DEFAULT '{}';");
-  } catch (e) {
-    // Ignoruj jeśli kolumna już istnieje
-  }
-  
-  // Best-effort migration: dodaj kolumnę exchange jeśli jej brakuje
-  try {
-    await db.exec("ALTER TABLE user_settings ADD COLUMN exchange TEXT DEFAULT 'asterdex';");
-  } catch (e) {
-    // Ignoruj jeśli kolumna już istnieje
-  }
-})();
-
 /**
  * UserSettings model - SQLite version
  */

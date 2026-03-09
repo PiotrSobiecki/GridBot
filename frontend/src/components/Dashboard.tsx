@@ -12,6 +12,7 @@ import {
   Zap,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { useQuery } from "@tanstack/react-query";
 import { useStore } from "../store/useStore";
 import { api } from "../api";
 import OrderTabs from "./OrderTabs";
@@ -94,7 +95,19 @@ export default function Dashboard() {
     gridStates,
     logout,
     positions,
-  } = useStore();
+    updatePrice,
+  } = useStore((state) => ({
+    walletAddress: state.walletAddress,
+    userSettings: state.userSettings,
+    activeOrderIndex: state.activeOrderIndex,
+    setActiveOrderIndex: state.setActiveOrderIndex,
+    setUserSettings: state.setUserSettings,
+    setGridState: state.setGridState,
+    gridStates: state.gridStates,
+    logout: state.logout,
+    positions: state.positions,
+    updatePrice: state.updatePrice,
+  }));
 
   const [showWallet, setShowWallet] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -248,45 +261,41 @@ export default function Dashboard() {
   const gridRefreshIntervalMs =
     (activeOrder?.refreshInterval ?? orders[0]?.refreshInterval ?? 5) * 1000;
 
-  useEffect(() => {
-    // Fetch prices – co refreshInterval sekund (zgodnie z ustawieniem na froncie)
-    // Użyj walletAddress żeby backend wiedział z której giełdy pobrać ceny
-    const fetchPrices = async () => {
-      try {
-        const priceData = await api.getPrices(walletAddress);
-        Object.entries(priceData as Record<string, any>).forEach(
-          ([symbol, data]) => {
-            let numPrice: number;
-            let changePercent: number | null = null;
+  // Pobieranie cen przez React Query – jedno źródło prawdy dla całej aplikacji
+  useQuery({
+    queryKey: ["prices", walletAddress],
+    enabled: !!walletAddress,
+    refetchInterval: priceRefreshIntervalMs,
+    queryFn: async () => {
+      if (!walletAddress) return {};
+      const priceData = await api.getPrices(walletAddress);
+      Object.entries(priceData as Record<string, any>).forEach(
+        ([symbol, data]) => {
+          let numPrice: number;
+          let changePercent: number | null = null;
 
-            if (typeof data === "object" && data !== null && "price" in data) {
-              numPrice =
-                typeof data.price === "string"
-                  ? parseFloat(data.price)
-                  : Number(data.price);
-              changePercent =
-                data.priceChangePercent != null
-                  ? Number(data.priceChangePercent)
-                  : null;
-            } else {
-              numPrice =
-                typeof data === "string" ? parseFloat(data) : Number(data);
-            }
+          if (typeof data === "object" && data !== null && "price" in data) {
+            numPrice =
+              typeof data.price === "string"
+                ? parseFloat(data.price)
+                : Number(data.price);
+            changePercent =
+              data.priceChangePercent != null
+                ? Number(data.priceChangePercent)
+                : null;
+          } else {
+            numPrice =
+              typeof data === "string" ? parseFloat(data) : Number(data);
+          }
 
-            if (!isNaN(numPrice) && numPrice > 0) {
-              useStore.getState().updatePrice(symbol, numPrice, changePercent);
-            }
-          },
-        );
-      } catch (error) {
-        console.error("Failed to fetch prices:", error);
-      }
-    };
-
-    fetchPrices();
-    const interval = setInterval(fetchPrices, priceRefreshIntervalMs);
-    return () => clearInterval(interval);
-  }, [priceRefreshIntervalMs, walletAddress]);
+          if (!isNaN(numPrice) && numPrice > 0) {
+            updatePrice(symbol, numPrice, changePercent);
+          }
+        },
+      );
+      return priceData;
+    },
+  });
 
   // Odśwież stan gridu aktywnego zlecenia – co refreshInterval tego zlecenia
   useEffect(() => {

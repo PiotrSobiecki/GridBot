@@ -3,6 +3,7 @@ import * as AsterSpotService from "./AsterSpotService.js";
 import * as BingXService from "./BingXService.js";
 import * as WalletService from "./WalletService.js";
 import UserSettings from "../models/UserSettings.js";
+import { getExchangeForWallet } from "./ExchangeConfigService.js";
 
 // Cache dla exchangeInfo per giełda (aby nie pobierać za każdym razem)
 const exchangeInfoCache = new Map(); // exchange -> { data, time }
@@ -14,29 +15,6 @@ const EXCHANGE_INFO_CACHE_MS = 5 * 60 * 1000; // 5 minut
 export function clearExchangeInfoCache() {
   exchangeInfoCache.clear();
   console.log('🔄 ExchangeInfo cache cleared');
-}
-
-/**
- * Pobiera wybraną giełdę dla użytkownika (domyślnie "asterdex")
- * @param {string} walletAddress - adres portfela
- * @returns {Promise<"asterdex"|"bingx">}
- */
-async function getExchange(walletAddress) {
-  if (!walletAddress) {
-    return "asterdex"; // Domyślnie AsterDex
-  }
-  
-  try {
-    const settings = await UserSettings.findOne({
-      walletAddress: walletAddress.toLowerCase(),
-    });
-    
-    const exchange = settings?.exchange || "asterdex";
-    return exchange === "bingx" ? "bingx" : "asterdex";
-  } catch (e) {
-    console.warn(`⚠️ Failed to get exchange for wallet=${walletAddress}:`, e.message);
-    return "asterdex";
-  }
 }
 
 /**
@@ -66,7 +44,7 @@ function symbolMatchesExchange(symbolFromExchange, symbolWeWant, exchange) {
  * @returns {Promise<{stepSize?: string, tickSize?: string}>}
  */
 async function getSymbolPrecision(symbol, walletAddress = null, forcedExchange = null) {
-  const exchange = forcedExchange || await getExchange(walletAddress);
+  const exchange = forcedExchange || (await getExchangeForWallet(walletAddress));
   const exchangeService = getExchangeService(exchange);
   
   const now = Date.now();
@@ -138,7 +116,7 @@ async function getSymbolPrecision(symbol, walletAddress = null, forcedExchange =
  * @returns {Promise<{valid: boolean, symbolInfo?: object, availableSymbols?: string[], error?: string}>}
  */
 async function validateSymbol(symbol, walletAddress = null, forcedExchange = null) {
-  const exchange = forcedExchange || await getExchange(walletAddress);
+  const exchange = forcedExchange || await getExchangeForWallet(walletAddress);
   const exchangeService = getExchangeService(exchange);
   
   const now = Date.now();
@@ -301,12 +279,12 @@ export async function placeSpotBuy(
   logPaperModeOnce();
   if (isPaperTrading()) {
     // Tryb paper-trading - symulacja bez realnych zleceń
-    return executePaperBuy(walletAddress, symbol, quoteAmount, expectedPrice);
+    return await executePaperBuy(walletAddress, symbol, quoteAmount, expectedPrice);
   }
 
   try {
     // Użyj wymuszonej giełdy (z zlecenia) lub pobierz globalną z UserSettings
-    const exchange = forcedExchange || await getExchange(walletAddress);
+    const exchange = forcedExchange || await getExchangeForWallet(walletAddress);
     const exchangeService = getExchangeService(exchange);
     const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
     
@@ -377,7 +355,7 @@ export async function placeSpotBuy(
       error: "Order placed but no orderId returned",
     };
   } catch (error) {
-    const exchange = forcedExchange || await getExchange(walletAddress);
+    const exchange = forcedExchange || await getExchangeForWallet(walletAddress);
     const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
     console.error(`❌ Failed to place BUY order on ${exchangeName}:`, error.message);
     return {
@@ -406,12 +384,12 @@ export async function placeSpotSell(
   logPaperModeOnce();
   if (isPaperTrading()) {
     // Tryb paper-trading - symulacja bez realnych zleceń
-    return executePaperSell(walletAddress, symbol, baseAmount, expectedPrice);
+    return await executePaperSell(walletAddress, symbol, baseAmount, expectedPrice);
   }
 
   try {
     // Użyj wymuszonej giełdy (z zlecenia) lub pobierz globalną z UserSettings
-    const exchange = forcedExchange || await getExchange(walletAddress);
+    const exchange = forcedExchange || await getExchangeForWallet(walletAddress);
     const exchangeService = getExchangeService(exchange);
     const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
     
@@ -498,7 +476,7 @@ export async function placeSpotSell(
       error: "Order placed but no orderId returned",
     };
   } catch (error) {
-    const exchange = forcedExchange || await getExchange(walletAddress);
+    const exchange = forcedExchange || await getExchangeForWallet(walletAddress);
     const exchangeName = exchange === "bingx" ? "BingX" : "AsterDex";
     console.error(`❌ Failed to place SELL order on ${exchangeName}:`, error.message);
     return {
@@ -527,7 +505,7 @@ async function executePaperBuy(
 
   const baseAmount = quoteAmount.div(expectedPrice);
 
-  const success = WalletService.executeBuy(
+  const success = await WalletService.executeBuy(
     walletAddress,
     quoteAsset,
     baseAsset,
@@ -572,7 +550,7 @@ async function executePaperSell(
 
   const quoteReceived = baseAmount.mul(expectedPrice);
 
-  const success = WalletService.executeSell(
+  const success = await WalletService.executeSell(
     walletAddress,
     baseAsset,
     quoteAsset,
