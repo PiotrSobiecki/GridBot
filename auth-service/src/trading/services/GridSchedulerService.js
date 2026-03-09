@@ -6,8 +6,8 @@ import * as PriceFeedService from "./PriceFeedService.js";
 import * as AsterSpotService from "./AsterSpotService.js";
 import * as BingXService from "./BingXService.js";
 import * as WalletService from "./WalletService.js";
-// Use SQLite UserSettings model
 import UserSettings from "../models/UserSettings.js";
+import Order from "../models/Order.js";
 
 /**
  * Pobiera wybraną giełdę dla użytkownika (domyślnie "asterdex")
@@ -124,38 +124,13 @@ async function processActiveOrders() {
       // Zbierz wszystkie unikalne portfele z ich giełdami z ustawień zleceń
       for (const state of activeStates) {
         try {
-          const settings = await getOrderSettings(state.walletAddress, state.orderId);
-          if (settings) {
-            // Użyj exchange z ustawień zlecenia
-            const orderExchange = settings.exchange || "asterdex";
-            
-            // Znajdź aktualny portfel użytkownika który ma to zlecenie
-            // (zlecenie może być przypisane do innego portfela niż state.walletAddress)
-            const db = (await import("../db.js")).default;
-            const stmt = db.prepare("SELECT * FROM user_settings");
-            const allSettings = await stmt.all();
-            
-            let currentWallet = state.walletAddress; // fallback
-            for (const row of allSettings) {
-              const userSettings = new UserSettings(row);
-              if (userSettings.orders && userSettings.orders.some(o => (o.id === state.orderId || o._id === state.orderId))) {
-                currentWallet = userSettings.walletAddress;
-                break;
-              }
-            }
-            
-            console.log(
-              `🔍 Price refresh check: orderId=${state.orderId}, ` +
-              `state.wallet=${state.walletAddress}, ` +
-              `currentWallet=${currentWallet}, ` +
-              `orderExchange=${orderExchange}`
-            );
-            
-            // Użyj exchange z ustawień zlecenia (może być inny niż domyślny z UserSettings)
-            walletsToRefresh.set(currentWallet.toLowerCase(), orderExchange);
+          const order = await Order.findById(state.orderId);
+          if (order) {
+            const wallet = (order.walletAddress || state.walletAddress).toLowerCase();
+            walletsToRefresh.set(wallet, order.exchange || "asterdex");
           }
         } catch (e) {
-          console.warn(`⚠️ Failed to get settings for order ${state.orderId}:`, e.message);
+          console.warn(`⚠️ Failed to get order ${state.orderId}:`, e.message);
         }
       }
       
@@ -219,28 +194,15 @@ async function processOrder(state) {
     return;
   }
 
-  // Znajdź aktualny portfel użytkownika który ma to zlecenie
-  // (zlecenie może być przypisane do innego portfela niż state.walletAddress)
-  let currentWallet = state.walletAddress; // fallback
+  // Znajdź aktualny portfel z tabeli orders
+  let currentWallet = state.walletAddress;
   try {
-    const db = (await import("../db.js")).default;
-    const stmt = db.prepare("SELECT * FROM user_settings");
-    const allSettings = await stmt.all();
-    
-    for (const row of allSettings) {
-      const userSettings = new UserSettings(row);
-      if (userSettings.orders && userSettings.orders.some(o => (o.id === state.orderId || o._id === state.orderId))) {
-        currentWallet = userSettings.walletAddress;
-        if (currentWallet.toLowerCase() !== state.walletAddress.toLowerCase()) {
-          console.log(
-            `🔄 Order ${state.orderId} belongs to wallet ${currentWallet}, but GridState has ${state.walletAddress}`
-          );
-        }
-        break;
-      }
+    const order = await Order.findById(state.orderId);
+    if (order?.walletAddress) {
+      currentWallet = order.walletAddress;
     }
   } catch (e) {
-    console.warn(`⚠️ Failed to find current wallet for order ${state.orderId}:`, e.message);
+    console.warn(`⚠️ Failed to find wallet for order ${state.orderId}:`, e.message);
   }
 
   // 1) Uszanuj refreshInterval z frontu (w sekundach).
@@ -310,46 +272,16 @@ async function processOrder(state) {
 }
 
 /**
- * Pobiera ustawienia zlecenia z SQLite
- * Szuka zlecenia po orderId we wszystkich UserSettings (nie tylko dla starego walletAddress)
+ * Pobiera ustawienia zlecenia z tabeli orders
  */
 async function getOrderSettings(walletAddress, orderId) {
   try {
-    // Najpierw spróbuj znaleźć zlecenie dla podanego portfela
-    let userSettings = await UserSettings.findOne({
-      walletAddress: walletAddress.toLowerCase(),
-    });
-
-    if (userSettings && userSettings.orders) {
-      const order = userSettings.orders.find((o) => o.id === orderId || o._id === orderId);
-      if (order) {
-        return order;
-      }
-    }
-
-    // Jeśli nie znaleziono dla starego portfela, szukaj we wszystkich UserSettings
-    // (zlecenie mogło zostać przeniesione do nowego portfela)
-    console.log(`🔍 Order ${orderId} not found for wallet ${walletAddress}, searching in all UserSettings...`);
-    
-    // Pobierz wszystkie UserSettings i szukaj zlecenia
-    const db = (await import("../db.js")).default;
-    const stmt = db.prepare("SELECT * FROM user_settings");
-    const allSettings = await stmt.all();
-    
-    for (const row of allSettings) {
-      const settings = new UserSettings(row);
-      if (settings.orders && settings.orders.length > 0) {
-        const order = settings.orders.find((o) => o.id === orderId || o._id === orderId);
-        if (order) {
-          console.log(`✅ Found order ${orderId} in wallet ${settings.walletAddress} (was looking in ${walletAddress})`);
-          return order;
-        }
-      }
-    }
-
+    const order = await Order.findById(orderId);
+    if (order) return order.toSettings();
+    console.warn(`⚠️ Order ${orderId} not found in orders table`);
     return null;
   } catch (error) {
-    console.error("Error fetching settings:", error.message);
+    console.error("Error fetching order settings:", error.message);
     return null;
   }
 }

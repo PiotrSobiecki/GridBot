@@ -205,9 +205,27 @@ if (usePostgres) {
       id TEXT PRIMARY KEY,
       wallet_address TEXT UNIQUE NOT NULL,
       wallet_currencies TEXT DEFAULT '[]',
-      orders TEXT DEFAULT '[]',
       api_config TEXT DEFAULT '{}',
       exchange TEXT DEFAULT 'asterdex',
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS orders (
+      id TEXT PRIMARY KEY,
+      wallet_address TEXT NOT NULL,
+      name TEXT NOT NULL DEFAULT 'Zlecenie 1',
+      is_active INTEGER NOT NULL DEFAULT 0 CHECK(is_active IN (0,1)),
+      exchange TEXT NOT NULL DEFAULT 'asterdex',
+      base_asset TEXT NOT NULL DEFAULT 'BTC',
+      quote_asset TEXT NOT NULL DEFAULT 'USDT',
+      trade_mode TEXT NOT NULL DEFAULT 'both' CHECK(trade_mode IN ('both','buyOnly','sellOnly')),
+      refresh_interval INTEGER NOT NULL DEFAULT 30 CHECK(refresh_interval >= 1),
+      min_profit_percent REAL NOT NULL DEFAULT 0.5 CHECK(min_profit_percent > 0),
+      focus_price REAL NOT NULL DEFAULT 0 CHECK(focus_price >= 0),
+      focus_locked INTEGER NOT NULL DEFAULT 1 CHECK(focus_locked IN (0,1)),
+      time_to_new_focus INTEGER NOT NULL DEFAULT 0 CHECK(time_to_new_focus >= 0),
+      config TEXT NOT NULL DEFAULT '{}',
       created_at TEXT,
       updated_at TEXT
     );
@@ -217,6 +235,9 @@ if (usePostgres) {
     CREATE INDEX IF NOT EXISTS idx_positions_wallet ON positions(wallet_address, order_id);
     CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
     CREATE INDEX IF NOT EXISTS idx_user_settings_wallet ON user_settings(wallet_address);
+    CREATE INDEX IF NOT EXISTS idx_orders_wallet ON orders(wallet_address);
+    CREATE INDEX IF NOT EXISTS idx_orders_wallet_exchange ON orders(wallet_address, exchange);
+    CREATE INDEX IF NOT EXISTS idx_orders_active ON orders(is_active);
   `);
 
   // Migracje dla istniejących baz - dodaj kolumnę exchange jeśli nie istnieje
@@ -252,6 +273,9 @@ if (usePostgres) {
       }
     }
   }
+
+  // Migracja orders: przenieś zlecenia z user_settings.orders do nowej tabeli orders
+  await migrateOrdersFromUserSettings(sqliteDb);
 
   db = sqliteDb;
   console.log('✅ SQLite database initialized');
@@ -317,9 +341,27 @@ async function initPostgresTables(pool) {
       id VARCHAR(255) PRIMARY KEY,
       wallet_address VARCHAR(255) UNIQUE NOT NULL,
       wallet_currencies TEXT DEFAULT '[]',
-      orders TEXT DEFAULT '[]',
       api_config TEXT DEFAULT '{}',
       exchange VARCHAR(50) DEFAULT 'asterdex',
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS orders (
+      id VARCHAR(255) PRIMARY KEY,
+      wallet_address VARCHAR(255) NOT NULL,
+      name VARCHAR(255) NOT NULL DEFAULT 'Zlecenie 1',
+      is_active SMALLINT NOT NULL DEFAULT 0 CHECK(is_active IN (0,1)),
+      exchange VARCHAR(50) NOT NULL DEFAULT 'asterdex',
+      base_asset VARCHAR(20) NOT NULL DEFAULT 'BTC',
+      quote_asset VARCHAR(20) NOT NULL DEFAULT 'USDT',
+      trade_mode VARCHAR(20) NOT NULL DEFAULT 'both' CHECK(trade_mode IN ('both','buyOnly','sellOnly')),
+      refresh_interval INTEGER NOT NULL DEFAULT 30 CHECK(refresh_interval >= 1),
+      min_profit_percent DOUBLE PRECISION NOT NULL DEFAULT 0.5 CHECK(min_profit_percent > 0),
+      focus_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK(focus_price >= 0),
+      focus_locked SMALLINT NOT NULL DEFAULT 1 CHECK(focus_locked IN (0,1)),
+      time_to_new_focus INTEGER NOT NULL DEFAULT 0 CHECK(time_to_new_focus >= 0),
+      config TEXT NOT NULL DEFAULT '{}',
       created_at TEXT,
       updated_at TEXT
     );
@@ -329,6 +371,9 @@ async function initPostgresTables(pool) {
     CREATE INDEX IF NOT EXISTS idx_positions_wallet ON positions(wallet_address, order_id);
     CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
     CREATE INDEX IF NOT EXISTS idx_user_settings_wallet ON user_settings(wallet_address);
+    CREATE INDEX IF NOT EXISTS idx_orders_wallet ON orders(wallet_address);
+    CREATE INDEX IF NOT EXISTS idx_orders_wallet_exchange ON orders(wallet_address, exchange);
+    CREATE INDEX IF NOT EXISTS idx_orders_active ON orders(is_active);
   `);
 
   // Migracja dla Postgres - dodaj kolumnę exchange jeśli nie istnieje
@@ -380,6 +425,103 @@ async function initPostgresTables(pool) {
     } catch (e) {
       console.error(`❌ Migration swing ${m.table}.${m.col}:`, e.message);
     }
+  }
+
+  // Migracja orders: przenieś zlecenia z user_settings.orders do nowej tabeli orders (Postgres)
+  await migrateOrdersFromUserSettingsPostgres(pool);
+}
+
+/**
+ * Migracja SQLite: przenosi zlecenia z user_settings.orders (JSON) do tabeli orders
+ */
+async function migrateOrdersFromUserSettings(sqliteDb) {
+  try {
+    // Sprawdź czy kolumna orders jeszcze istnieje w user_settings
+    const tableInfo = sqliteDb.prepare("PRAGMA table_info(user_settings)").all();
+    const hasOrdersCol = tableInfo.some(col => col.name === 'orders');
+    if (!hasOrdersCol) return;
+
+    const rows = sqliteDb.prepare("SELECT wallet_address, orders FROM user_settings WHERE orders IS NOT NULL AND orders != '[]'").all();
+    let migrated = 0;
+    for (const row of rows) {
+      let orders = [];
+      try { orders = JSON.parse(row.orders || '[]'); } catch { continue; }
+      for (const o of orders) {
+        const id = o.id || o._id;
+        if (!id) continue;
+        // Sprawdź czy już istnieje
+        const exists = sqliteDb.prepare("SELECT id FROM orders WHERE id = ?").get(id);
+        if (exists) continue;
+        const { id: _id, _id: __id, name, isActive, exchange, baseAsset, quoteAsset, tradeMode,
+          refreshInterval, minProfitPercent, focusPrice, focusLocked, timeToNewFocus,
+          created_at, createdAt, ...rest } = o;
+        sqliteDb.prepare(`
+          INSERT INTO orders (id, wallet_address, name, is_active, exchange, base_asset, quote_asset,
+            trade_mode, refresh_interval, min_profit_percent, focus_price, focus_locked,
+            time_to_new_focus, config, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          id, row.wallet_address, name || 'Zlecenie 1', isActive ? 1 : 0,
+          exchange || 'asterdex', baseAsset || 'BTC', quoteAsset || 'USDT',
+          tradeMode || 'both', Number(refreshInterval) || 30,
+          Number(minProfitPercent) || 0.5, Number(focusPrice) || 0,
+          focusLocked !== false ? 1 : 0, Number(timeToNewFocus) || 0,
+          JSON.stringify(rest), createdAt || created_at || new Date().toISOString(),
+          new Date().toISOString()
+        );
+        migrated++;
+      }
+    }
+    if (migrated > 0) console.log(`✅ Migration: moved ${migrated} orders to orders table (SQLite)`);
+  } catch (e) {
+    console.error('❌ Migration orders (SQLite):', e.message);
+  }
+}
+
+/**
+ * Migracja Postgres: przenosi zlecenia z user_settings.orders (JSON) do tabeli orders
+ */
+async function migrateOrdersFromUserSettingsPostgres(pool) {
+  try {
+    // Sprawdź czy kolumna orders istnieje
+    const chk = await pool.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'user_settings' AND column_name = 'orders'`
+    );
+    if (chk.rows.length === 0) return;
+
+    const result = await pool.query("SELECT wallet_address, orders FROM user_settings WHERE orders IS NOT NULL AND orders != '[]'");
+    let migrated = 0;
+    for (const row of result.rows) {
+      let orders = [];
+      try { orders = JSON.parse(row.orders || '[]'); } catch { continue; }
+      for (const o of orders) {
+        const id = o.id || o._id;
+        if (!id) continue;
+        const exists = await pool.query("SELECT id FROM orders WHERE id = $1", [id]);
+        if (exists.rows.length > 0) continue;
+        const { id: _id, _id: __id, name, isActive, exchange, baseAsset, quoteAsset, tradeMode,
+          refreshInterval, minProfitPercent, focusPrice, focusLocked, timeToNewFocus,
+          created_at, createdAt, ...rest } = o;
+        await pool.query(`
+          INSERT INTO orders (id, wallet_address, name, is_active, exchange, base_asset, quote_asset,
+            trade_mode, refresh_interval, min_profit_percent, focus_price, focus_locked,
+            time_to_new_focus, config, created_at, updated_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        `, [
+          id, row.wallet_address, name || 'Zlecenie 1', isActive ? 1 : 0,
+          exchange || 'asterdex', baseAsset || 'BTC', quoteAsset || 'USDT',
+          tradeMode || 'both', Number(refreshInterval) || 30,
+          Number(minProfitPercent) || 0.5, Number(focusPrice) || 0,
+          focusLocked !== false ? 1 : 0, Number(timeToNewFocus) || 0,
+          JSON.stringify(rest), createdAt || created_at || new Date().toISOString(),
+          new Date().toISOString()
+        ]);
+        migrated++;
+      }
+    }
+    if (migrated > 0) console.log(`✅ Migration: moved ${migrated} orders to orders table (Postgres)`);
+  } catch (e) {
+    console.error('❌ Migration orders (Postgres):', e.message);
   }
 }
 

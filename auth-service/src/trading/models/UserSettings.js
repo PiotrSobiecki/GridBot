@@ -42,7 +42,6 @@ export class UserSettings {
     this.wallet = this._parseJson(
       data.wallet || data.wallet_currencies || "[]",
     );
-    this.orders = this._parseJson(data.orders || "[]");
     // Konfiguracja API per użytkownik (zaszyfrowane klucze, nazwa konta, avatar)
     this.apiConfig = this._parseJson(data.apiConfig || data.api_config || "{}");
     // Wybrana giełda: "asterdex" lub "bingx"
@@ -66,15 +65,14 @@ export class UserSettings {
     if (!this.createdAt) this.createdAt = now;
 
     const stmt = db.prepare(`
-      INSERT OR REPLACE INTO user_settings (id, wallet_address, wallet_currencies, orders, api_config, exchange, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO user_settings (id, wallet_address, wallet_currencies, api_config, exchange, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     await stmt.run(
       this.id,
       this.walletAddress,
       JSON.stringify(this.wallet),
-      JSON.stringify(this.orders),
       JSON.stringify(this.apiConfig || {}),
       this.exchange || "asterdex",
       this.createdAt,

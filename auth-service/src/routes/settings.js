@@ -1,8 +1,8 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
-// Use SQLite model instead of MongoDB
 import UserSettings from "../trading/models/UserSettings.js";
+import Order from "../trading/models/Order.js";
 import GridState from "../trading/models/GridState.js";
 import * as GridAlgorithmService from "../trading/services/GridAlgorithmService.js";
 import { encrypt, decrypt } from "../trading/services/CryptoService.js";
@@ -13,9 +13,9 @@ const JWT_SECRET = process.env.JWT_SECRET || "gridbot-secret-key";
 // Helper – normalizuje strukturę zleceń tak, żeby frontend miał zawsze _id
 const normalizeOrders = (orders = []) =>
   orders.map((o) => ({
-    _id: o._id || o.id,
-    id: o.id || o._id,
     ...o,
+    _id: o._id || o.id,
+    id:  o.id  || o._id,
   }));
 
 // Middleware autoryzacji
@@ -47,38 +47,12 @@ router.get("/", authMiddleware, async (req, res) => {
     }
 
     const currentExchange = settings.exchange || "asterdex";
-    
-    // Migracja: przypisz aktualną giełdę do zleceń bez pola exchange
-    let needsSave = false;
-    const migratedOrders = (settings.orders || []).map(order => {
-      if (!order.exchange) {
-        order.exchange = currentExchange;
-        needsSave = true;
-      }
-      return order;
-    });
-    
-    if (needsSave) {
-      settings.orders = migratedOrders;
-      await settings.save();
-      console.log(`🔄 Migrated orders: assigned exchange=${currentExchange} to orders without exchange field`);
-    }
-    
-    // Filtruj zlecenia - pokazuj tylko te dla aktualnie wybranej giełdy
-    const filteredOrders = migratedOrders.filter(order => {
-      const orderExchange = order.exchange || "asterdex";
-      return orderExchange === currentExchange;
-    });
-    
-    console.log(
-      `📊 Settings filter: wallet=${req.walletAddress}, exchange=${currentExchange}, ` +
-      `total=${migratedOrders.length}, filtered=${filteredOrders.length}`
-    );
+    const orders = await Order.findByWalletAndExchange(req.walletAddress, currentExchange);
 
     res.json({
       walletAddress: settings.walletAddress,
       wallet: settings.wallet,
-      orders: normalizeOrders(filteredOrders),
+      orders: normalizeOrders(orders.map(o => o.toJSON())),
       exchange: currentExchange,
     });
   } catch (error) {
@@ -269,35 +243,8 @@ router.get("/orders", authMiddleware, async (req, res) => {
   try {
     const settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
     const currentExchange = settings?.exchange || "asterdex";
-    
-    // Migracja: przypisz aktualną giełdę do zleceń bez pola exchange
-    let needsSave = false;
-    const migratedOrders = (settings?.orders || []).map(order => {
-      if (!order.exchange) {
-        order.exchange = currentExchange;
-        needsSave = true;
-      }
-      return order;
-    });
-    
-    if (needsSave && settings) {
-      settings.orders = migratedOrders;
-      await settings.save();
-      console.log(`🔄 Migrated orders: assigned exchange=${currentExchange} to orders without exchange field`);
-    }
-    
-    // Filtruj zlecenia - pokazuj tylko te dla aktualnie wybranej giełdy
-    const filteredOrders = migratedOrders.filter(order => {
-      const orderExchange = order.exchange || "asterdex";
-      return orderExchange === currentExchange;
-    });
-    
-    console.log(
-      `📊 Orders filter: wallet=${req.walletAddress}, exchange=${currentExchange}, ` +
-      `total=${migratedOrders.length}, filtered=${filteredOrders.length}`
-    );
-    
-    res.json(normalizeOrders(filteredOrders));
+    const orders = await Order.findByWalletAndExchange(req.walletAddress, currentExchange);
+    res.json(normalizeOrders(orders.map(o => o.toJSON())));
   } catch (error) {
     console.error("Get orders error:", error);
     res.status(500).json({ error: "Failed to get orders" });
@@ -307,30 +254,18 @@ router.get("/orders", authMiddleware, async (req, res) => {
 // Dodaj nowe zlecenie
 router.post("/orders", authMiddleware, async (req, res) => {
   try {
-    const orderData = { ...req.body };
+    const settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
+    const currentExchange = settings?.exchange || "asterdex";
 
-    let settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
+    const order = new Order({
+      ...req.body,
+      id: req.body.id || req.body._id || uuidv4(),
+      walletAddress: req.walletAddress,
+      exchange: req.body.exchange || currentExchange,
+    });
 
-    if (!settings) {
-      settings = new UserSettings({ walletAddress: req.walletAddress });
-    }
-
-    // Ensure order has an ID (id oraz _id dla frontu)
-    if (!orderData.id && !orderData._id) {
-      orderData.id = uuidv4();
-    }
-    orderData._id = orderData._id || orderData.id;
-    orderData.id = orderData.id || orderData._id;
-    
-    // Przypisz aktualną giełdę do zlecenia (jeśli nie została podana)
-    if (!orderData.exchange) {
-      orderData.exchange = settings.exchange || "asterdex";
-    }
-
-    settings.orders.push(orderData);
-    await settings.save();
-
-    res.json(orderData);
+    await order.save();
+    res.json(order.toJSON());
   } catch (error) {
     console.error("Create order error:", error);
     res.status(500).json({ error: "Failed to create order" });
@@ -343,94 +278,51 @@ router.put("/orders/:orderId", authMiddleware, async (req, res) => {
     const { orderId } = req.params;
     const updateData = req.body;
 
-    let settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
-
-    if (!settings) {
-      return res.status(404).json({ error: "Settings not found" });
-    }
-
-    const orderIndex = settings.orders.findIndex(
-      (o) => o.id === orderId || o._id === orderId
-    );
-
-    if (orderIndex === -1) {
+    const existingOrder = await Order.findById(orderId);
+    if (!existingOrder) {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    const existingOrder = settings.orders[orderIndex] || {};
-
     // Logika Focus:
-    // - focusLocked na froncie (checkbox) służy tylko do "tymczasowego odblokowania" na czas edycji,
-    // - po ZAPISANIU zawsze zapisujemy focusLocked = true,
-    // - focusPrice można zmienić:
-    //    * przy pierwszym ustawieniu (brak wartości lub 0),
-    //    * lub gdy użytkownik wyśle focusLocked=false (odblokowanie na tę jedną edycję).
-    const isFirstFocus =
-      typeof existingOrder.focusPrice !== "number" ||
-      existingOrder.focusPrice === 0;
+    // - focusLocked=false z frontu = jednorazowe odblokowanie zmiany focusPrice,
+    // - po zapisaniu zawsze wracamy do focusLocked=true.
+    const isFirstFocus = !existingOrder.focusPrice || existingOrder.focusPrice === 0;
     const unblockRequested = updateData.focusLocked === false;
-
-    let nextFocusPrice = existingOrder.focusPrice;
     let focusChangedThisUpdate = false;
 
     if ((isFirstFocus || unblockRequested) && typeof updateData.focusPrice === "number") {
-      nextFocusPrice = updateData.focusPrice;
       focusChangedThisUpdate = existingOrder.focusPrice !== updateData.focusPrice;
+      existingOrder.focusPrice = updateData.focusPrice;
     }
+    existingOrder.focusLocked = true; // po zapisie zawsze zablokowany
 
-    // Po zapisie Focus jest zawsze zablokowany – checkbox na froncie znów będzie zaznaczony.
-    const nextFocusLocked = true;
+    // Nadpisz pozostałe pola (oprócz id i walletAddress)
+    const { id: _id, _id: __id, walletAddress: _w, focusPrice: _fp, focusLocked: _fl, ...rest } = updateData;
+    Object.assign(existingOrder, rest);
+    existingOrder.id = orderId;
 
-    // Merge update data with existing order (z korektą focus)
-    const updatedOrder = {
-      ...existingOrder,
-      ...updateData,
-      focusLocked: nextFocusLocked,
-      focusPrice:
-        typeof nextFocusPrice === "number"
-          ? nextFocusPrice
-          : existingOrder.focusPrice,
-      id: orderId,
-      _id: orderId,
-    };
+    await existingOrder.save();
 
-    settings.orders[orderIndex] = updatedOrder;
-
-    await settings.save();
-
-    // Jeśli zmieniły się kluczowe parametry (np. focusPrice),
-    // zaktualizuj także istniejący GridState, żeby wartości u góry
-    // (focus, następny zakup/sprzedaż) od razu się zgadzały.
-    try {
-      const lowerWallet = req.walletAddress.toLowerCase();
-      const state = await GridState.findByWalletAndOrderId(lowerWallet, orderId);
-      if (state && focusChangedThisUpdate && typeof updatedOrder.focusPrice === "number") {
-        const focusPrice = updatedOrder.focusPrice || 0;
-        state.currentFocusPrice = focusPrice;
-        state.focusLastUpdated = new Date().toISOString();
-        state.nextBuyTarget = GridAlgorithmService.calculateNextBuyTarget(
-          focusPrice,
-          state.buyTrendCounter || 0,
-          updatedOrder
-        ).toNumber();
-        state.nextSellTarget = GridAlgorithmService.calculateNextSellTarget(
-          focusPrice,
-          state.buyTrendCounter || 0,
-          updatedOrder
-        ).toNumber();
-        await state.save();
-        console.log(
-          `🔄 Synced GridState with new focusPrice for wallet=${lowerWallet}, orderId=${orderId}`
-        );
+    // Jeśli zmienił się focusPrice – zaktualizuj GridState od razu
+    if (focusChangedThisUpdate) {
+      try {
+        const lowerWallet = req.walletAddress.toLowerCase();
+        const state = await GridState.findByWalletAndOrderId(lowerWallet, orderId);
+        if (state) {
+          const fp = existingOrder.focusPrice;
+          state.currentFocusPrice = fp;
+          state.focusLastUpdated = new Date().toISOString();
+          state.nextBuyTarget = GridAlgorithmService.calculateNextBuyTarget(fp, state.buyTrendCounter || 0, existingOrder.toSettings()).toNumber();
+          state.nextSellTarget = GridAlgorithmService.calculateNextSellTarget(fp, state.buyTrendCounter || 0, existingOrder.toSettings()).toNumber();
+          await state.save();
+          console.log(`🔄 Synced GridState focusPrice=${fp} for order=${orderId}`);
+        }
+      } catch (syncError) {
+        console.error("⚠️ Failed to sync GridState after order update:", syncError.message);
       }
-    } catch (syncError) {
-      console.error(
-        "⚠️ Failed to sync GridState after order update:",
-        syncError.message
-      );
     }
 
-    res.json(updatedOrder);
+    res.json(existingOrder.toJSON());
   } catch (error) {
     console.error("Update order error:", error);
     res.status(500).json({ error: "Failed to update order" });
@@ -442,46 +334,23 @@ router.delete("/orders/:orderId", authMiddleware, async (req, res) => {
   try {
     const { orderId } = req.params;
 
-    let settings = await UserSettings.findOne({ walletAddress: req.walletAddress });
-
-    if (!settings) {
-      return res.status(404).json({ error: "Settings not found" });
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ error: "Order not found" });
     }
 
-    settings.orders = settings.orders.filter(
-      (o) => (o.id || o._id) !== orderId
-    );
-    await settings.save();
+    await order.delete();
 
-    // Dodatkowo wyczyść stan GRID + pozycje w SQLite/Postgres,
-    // żeby scheduler nie próbował dalej przetwarzać tego zlecenia.
+    // Wyczyść powiązany GRID state + pozycje
     try {
       const lowerWallet = req.walletAddress.toLowerCase();
-      const state = await GridState.findByWalletAndOrderId(lowerWallet, orderId);
-
-      if (state) {
-        const dbModule = await import("../trading/db.js");
-        const db = dbModule.default;
-
-        const deleteStateStmt = db.prepare(
-          "DELETE FROM grid_states WHERE wallet_address = ? AND order_id = ?"
-        );
-        await deleteStateStmt.run(lowerWallet, orderId);
-
-        const deletePositionsStmt = db.prepare(
-          "DELETE FROM positions WHERE wallet_address = ? AND order_id = ?"
-        );
-        await deletePositionsStmt.run(lowerWallet, orderId);
-
-        console.log(
-          `🧹 Deleted GRID state and positions for wallet=${lowerWallet}, orderId=${orderId}`
-        );
-      }
+      const dbModule = await import("../trading/db.js");
+      const db = dbModule.default;
+      await db.prepare("DELETE FROM grid_states WHERE wallet_address = ? AND order_id = ?").run(lowerWallet, orderId);
+      await db.prepare("DELETE FROM positions  WHERE wallet_address = ? AND order_id = ?").run(lowerWallet, orderId);
+      console.log(`🧹 Deleted GRID state and positions for order=${orderId}`);
     } catch (cleanupError) {
-      console.error(
-        "⚠️ Failed to cleanup GRID state/positions after order delete:",
-        cleanupError.message
-      );
+      console.error("⚠️ Failed to cleanup GRID state/positions:", cleanupError.message);
     }
 
     res.json({ success: true });
