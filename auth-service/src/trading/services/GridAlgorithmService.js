@@ -2348,42 +2348,48 @@ async function checkAndExecuteSellBuybacks(currentPrice, state, settings) {
  * Wykonuje odkup pozycji short
  */
 async function executeSellBuyback(currentPrice, position, state, settings) {
+  console.log(
+    `🔍 BUYBACK START position=${position.id} wallet=${state.walletAddress} ` +
+      `currentPrice=${currentPrice} amount=${position.amount} sellValue=${position.sellValue}`,
+  );
+
   const amount = new Decimal(position.amount);
   const buybackValue = amount.mul(currentPrice);
-  const profit = new Decimal(position.sellValue).minus(buybackValue);
+  const profit = new Decimal(position.sellValue || 0).minus(buybackValue);
+
+  console.log(
+    `🔍 BUYBACK calc position=${position.id} amount=${amount.toNumber()} ` +
+      `buybackValue=${buybackValue.toNumber()} sellValue=${position.sellValue} profit=${profit.toNumber()}`,
+  );
 
   if (profit.lt(0)) {
-    if (DEBUG_CONDITIONS) {
-      console.log(
-        `🔍 BUYBACK skipped (negative profit) wallet=${state.walletAddress} order=${state.orderId} ` +
-          `position=${position.id} sellValue=${position.sellValue} buybackValue=${buybackValue.toNumber()} profit=${profit.toNumber()}`,
-      );
-    }
+    console.log(
+      `🔍 BUYBACK skipped (negative profit) wallet=${state.walletAddress} order=${state.orderId} ` +
+        `position=${position.id} sellValue=${position.sellValue} buybackValue=${buybackValue.toNumber()} profit=${profit.toNumber()}`,
+    );
     return;
   }
 
   // Sprawdź minimalną wartość transakcji
   if (!meetsMinTransactionValue(buybackValue, settings)) {
-    if (DEBUG_CONDITIONS) {
-      console.log(
-        `🔍 BUYBACK skipped (minTransactionValue) wallet=${state.walletAddress} order=${state.orderId} ` +
-          `position=${position.id} buybackValue=${buybackValue.toNumber()} min=${settings.platform?.minTransactionValue}`,
-      );
-    }
+    console.log(
+      `🔍 BUYBACK skipped (minTransactionValue) wallet=${state.walletAddress} order=${state.orderId} ` +
+        `position=${position.id} buybackValue=${buybackValue.toNumber()} min=${settings.platform?.minTransactionValue}`,
+    );
     return;
   }
 
   // Sprawdź czy fee nie zje profitu
   const expectedProfit = profit;
   if (!checkFeeDoesNotEatProfit(buybackValue, expectedProfit, settings)) {
-    if (DEBUG_CONDITIONS) {
-      console.log(
-        `🔍 BUYBACK skipped (fee>=profit) wallet=${state.walletAddress} order=${state.orderId} ` +
-          `position=${position.id} buybackValue=${buybackValue.toNumber()} expectedProfit=${expectedProfit.toNumber()}`,
-      );
-    }
+    console.log(
+      `🔍 BUYBACK skipped (fee>=profit) wallet=${state.walletAddress} order=${state.orderId} ` +
+        `position=${position.id} buybackValue=${buybackValue.toNumber()} expectedProfit=${expectedProfit.toNumber()}`,
+    );
     return;
   }
+
+  console.log(`🔍 BUYBACK checks passed position=${position.id}, calling exchange...`);
 
   const baseAsset = settings.baseAsset || settings.sell?.currency || "BTC";
   const quoteAsset = settings.quoteAsset || settings.buy?.currency || "USDT";
@@ -2392,13 +2398,25 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
 
   // Wykonaj zlecenie BUY przez ExchangeService (odkup short)
   // Przekaż exchange z ustawień zlecenia (może być inny niż globalna giełda użytkownika)
-  const exchangeResult = await ExchangeService.placeSpotBuy(
-    state.walletAddress,
-    symbol,
-    buybackValue,
-    currentPrice,
-    exchange, // Przekaż giełdę z zlecenia
-  );
+  let exchangeResult;
+  try {
+    exchangeResult = await ExchangeService.placeSpotBuy(
+      state.walletAddress,
+      symbol,
+      buybackValue,
+      currentPrice,
+      exchange,
+    );
+    console.log(
+      `🔍 BUYBACK exchange result position=${position.id} success=${exchangeResult.success} ` +
+        `error=${exchangeResult.error || 'none'} executedQty=${exchangeResult.executedQty} avgPrice=${exchangeResult.avgPrice}`,
+    );
+  } catch (err) {
+    console.error(
+      `❌ BUYBACK exchange exception position=${position.id}: ${err.message}`,
+    );
+    return;
+  }
 
   if (!exchangeResult.success) {
     console.error(
@@ -2451,7 +2469,18 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
   position.profit = executedProfitNum;
   position.status = PositionStatus.CLOSED;
   position.closedAt = new Date().toISOString();
-  await position.save();
+  
+  try {
+    await position.save();
+    console.log(
+      `🔍 BUYBACK position saved position=${position.id} status=${position.status} profit=${executedProfitNum}`,
+    );
+  } catch (err) {
+    console.error(
+      `❌ BUYBACK position.save() error position=${position.id}: ${err.message}`,
+    );
+    return;
+  }
 
   state.openSellPositionIds = state.openSellPositionIds.filter(
     (id) => id !== position.id,
@@ -2585,7 +2614,16 @@ async function executeSellBuyback(currentPrice, position, state, settings) {
   });
 
   // Zapisz zaktualizowany stan (włącznie z nextSellTarget) do bazy danych
-  await state.save();
+  try {
+    await state.save();
+    console.log(
+      `✅ BUYBACK COMPLETE position=${position.id} saved to DB, status=${position.status}`,
+    );
+  } catch (err) {
+    console.error(
+      `❌ BUYBACK state.save() error position=${position.id}: ${err.message}`,
+    );
+  }
 }
 
 /**
