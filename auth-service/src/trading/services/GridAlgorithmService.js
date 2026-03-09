@@ -687,13 +687,25 @@ function checkSwingTrailing(currentPrice, trackingObj, highField, lowField, swin
   if (favorableDir === 'up') {
     const peak = trackingObj[highField] != null ? new Decimal(trackingObj[highField]) : null;
 
+    // Aktualizacja/ustawienie szczytu (peak)
     if (!peak || currentPrice.gt(peak)) {
-      trackingObj[highField] = currentPrice.toNumber();
+      if (DEBUG_CONDITIONS) {
+        const prev = peak ? peak.toNumber() : null;
+        console.log(
+          `🔍 SWING track(up) ${highField}: prevPeak=${prev ?? "-"} newPeak=${currentPrice.toNumber()}`,
+        );
+      }
+    trackingObj[highField] = currentPrice.toNumber();
       return { execute: false, updated: true };
     }
 
     const retrace = peak.minus(currentPrice).div(peak).mul(100);
     if (retrace.gte(swingPercent)) {
+      if (DEBUG_CONDITIONS) {
+        console.log(
+          `✅ SWING exec(up) ${highField}: peak=${peak.toNumber()} current=${currentPrice.toNumber()} retrace=${retrace.toDecimalPlaces(4).toString()}% swing=${swingPercent.toString()}%`,
+        );
+      }
       trackingObj[highField] = null;
       return { execute: true, updated: true };
     }
@@ -704,13 +716,25 @@ function checkSwingTrailing(currentPrice, trackingObj, highField, lowField, swin
   // favorableDir === 'down'
   const trough = trackingObj[lowField] != null ? new Decimal(trackingObj[lowField]) : null;
 
+  // Aktualizacja/ustawienie dołka (trough)
   if (!trough || currentPrice.lt(trough)) {
+    if (DEBUG_CONDITIONS) {
+      const prev = trough ? trough.toNumber() : null;
+      console.log(
+        `🔍 SWING track(down) ${lowField}: prevTrough=${prev ?? "-"} newTrough=${currentPrice.toNumber()}`,
+      );
+    }
     trackingObj[lowField] = currentPrice.toNumber();
     return { execute: false, updated: true };
   }
 
   const retrace = currentPrice.minus(trough).div(trough).mul(100);
   if (retrace.gte(swingPercent)) {
+    if (DEBUG_CONDITIONS) {
+      console.log(
+        `✅ SWING exec(down) ${lowField}: trough=${trough.toNumber()} current=${currentPrice.toNumber()} retrace=${retrace.toDecimalPlaces(4).toString()}% swing=${swingPercent.toString()}%`,
+      );
+    }
     trackingObj[lowField] = null;
     return { execute: true, updated: true };
   }
