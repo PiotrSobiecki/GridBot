@@ -6,7 +6,10 @@ import { decrypt } from "./CryptoService.js";
 const HOST = "open-api.bingx.com";
 const PROTOCOL = "https";
 
-// Funkcja do pobierania kluczy API (najpierw z bazy per portfel, potem z .env)
+// Funkcja do pobierania kluczy API.
+// ZASADA:
+// - dla konkretnych walleti (private endpoints) używamy TYLKO kluczy zapisanych w DB dla tego portfela;
+// - globalne klucze z .env są używane WYŁĄCZNIE dla walletAddress = null (globalne ceny itp.).
 async function getApiKeys(walletAddress) {
   // 1) Spróbuj z bazy (apiConfig.bingx) dla danego portfela
   if (walletAddress) {
@@ -37,6 +40,10 @@ async function getApiKeys(walletAddress) {
         e.message
       );
     }
+
+    // Dla portfeli użytkowników NIE robimy fallbacku do globalnych kluczy z .env.
+    // Jeśli użytkownik nie ma własnych kluczy – zwracamy brak kluczy.
+    return { API_KEY: null, API_SECRET: null, source: "db-missing" };
   }
 
   // 2) Fallback do zmiennych środowiskowych (.env) – globalne klucze
