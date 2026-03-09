@@ -49,69 +49,6 @@ export class UserSettings {
     this.exchange = data.exchange || "asterdex";
     this.createdAt = data.createdAt || data.created_at;
     this.updatedAt = data.updatedAt || data.updated_at;
-
-    // Initialize default orders if empty
-    if (this.orders.length === 0) {
-      this.orders = [
-        {
-          id: uuidv4(),
-          name: "Zlecenie 1",
-          isActive: false,
-          refreshInterval: 30, // 30 sekund
-          minProfitPercent: 0.5,
-          focusPrice: 0, // Będzie ustawione na aktualną cenę przy tworzeniu z frontendu
-          focusLocked: true,
-          timeToNewFocus: 0,
-          baseAsset: "BTC",
-          // Na spocie jako stable używamy USDT
-          quoteAsset: "USDT",
-          // Giełda dla tego zlecenia (domyślnie taka sama jak wybrana giełda użytkownika)
-          exchange: this.exchange || "asterdex",
-          // Domyślnie zlecenie może otwierać pozycje w obu kierunkach (kupno i sprzedaż)
-          tradeMode: "both",
-          buy: {
-            currency: "USDT",
-            walletProtection: 100,
-            mode: "walletLimit",
-            maxValue: 0,
-            addProfit: false,
-          },
-          sell: {
-            currency: "BTC",
-            walletProtection: 0.01,
-            mode: "onlyBought",
-            maxValue: 0,
-            addProfit: false,
-          },
-          platform: {
-            minTransactionValue: 0,
-            checkFeeProfit: true,
-          },
-          buyConditions: {
-            minValuePer1Percent: 20, // 20 USD
-            priceThreshold: 0, // Progi na 0
-            checkThresholdIfProfitable: true,
-          },
-          sellConditions: {
-            minValuePer1Percent: 20, // 20 USD
-            priceThreshold: 0, // Progi na 0
-            checkThresholdIfProfitable: true,
-          },
-          trendPercents: [
-            { trend: 0, buyPercent: 0.5, sellPercent: 0.5 },
-            { trend: 1, buyPercent: 1, sellPercent: 1 },
-            { trend: 2, buyPercent: 0.6, sellPercent: 0.6 },
-            { trend: 5, buyPercent: 0.1, sellPercent: 0.1 },
-          ],
-          additionalBuyValues: [], // Puste
-          additionalSellValues: [], // Puste
-          maxBuyPerTransaction: [], // Puste
-          maxSellPerTransaction: [], // Puste
-          buySwingPercent: [], // Puste
-          sellSwingPercent: [], // Puste
-        },
-      ];
-    }
   }
 
   _parseJson(value) {
