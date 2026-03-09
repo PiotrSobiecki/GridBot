@@ -261,6 +261,16 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
       maximumFractionDigits: 2,
     });
 
+  // Do wyświetlania: gdy NIE edytujemy, sortuj waluty malejąco po wartości w USD.
+  // W trybie edycji zostaw oryginalną kolejność (żeby indeksy się zgadzały).
+  const displayWallet = isEditing
+    ? localWallet
+    : [...localWallet].sort((a, b) => {
+        const va = getUsdValue(a.currency, a.balance ?? 0) ?? 0;
+        const vb = getUsdValue(b.currency, b.balance ?? 0) ?? 0;
+        return vb - va;
+      });
+
   return (
     <motion.div
       initial={{ opacity: 0, x: 20 }}
@@ -325,7 +335,7 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
 
       {/* Balances */}
       <div className="p-4 space-y-3">
-        {localWallet.map((item, index) => (
+        {displayWallet.map((item, index) => (
           <div
             key={index}
             className={`flex items-center justify-between p-3 rounded-lg ${
