@@ -36,11 +36,11 @@ export default function PriceDisplay() {
       .getAsterSymbols()
       .then((data: any) => {
         if (Array.isArray(data.baseAssets) && data.baseAssets.length > 0) {
-          // Na pasku nie pokazujemy MED – nawet jeśli jest dostępny na BingX,
-          // służy tylko do tradingu.
+          // Na pasku nie pokazujemy MED ani LUNC – dostępne tylko do tradingu w zleceniach.
+          const hiddenFromBar = ["MED", "LUNC"];
           setBaseAssets(
             data.baseAssets.filter(
-              (asset: string) => asset.toUpperCase() !== "MED",
+              (asset: string) => !hiddenFromBar.includes(asset.toUpperCase()),
             ),
           );
         }

@@ -508,6 +508,7 @@ const DEFAULT_TICKER_SYMBOLS = [
   "ASTER-USDT",
   "LINK-USDT",
   "MED-USDT",
+  "LUNC-USDT",
 ];
 
 // Cache listy symboli, żeby nie pytać exchangeInfo przy każdym odświeżeniu cen
@@ -534,7 +535,7 @@ async function getTickerSymbols() {
     );
 
     // Ograniczamy się tylko do wybranych krypto:
-    // BTC, ETH, BNB, SOL, XRP, TRON (TRX), DOGE, ASTER, LINK, MED
+    // BTC, ETH, BNB, SOL, XRP, TRON (TRX), DOGE, ASTER, LINK, MED, LUNC
     const allowedBases = [
       "BTC",
       "ETH",
@@ -546,6 +547,7 @@ async function getTickerSymbols() {
       "ASTER",
       "LINK",
       "MED",
+      "LUNC",
     ];
     const filtered = usdtPairs.filter((s) =>
       allowedBases.includes((s.baseAsset || "").toUpperCase()),
