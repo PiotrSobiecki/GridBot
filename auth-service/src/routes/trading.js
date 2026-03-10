@@ -362,30 +362,68 @@ router.get("/prices/:symbol", authMiddleware, async (req, res) => {
 });
 
 /**
- * Lista symboli i par spot z AsterDex (exchangeInfo)
+ * Lista symboli i par spot z giełdy użytkownika.
+ * Jeśli portfel ma ustawione exchange = "bingx", pobieramy wszystkie pary z BingX,
+ * ale do UI zwracamy tylko pary z quoteAsset = "USDT" (tak jak chciałeś).
+ * Jeśli exchange != "bingx", używamy AsterDex jak wcześniej.
  */
 router.get("/aster/symbols", authMiddleware, async (req, res) => {
   try {
+    const walletAddress = req.walletAddress;
+    const exchange = await getExchangeForWallet(walletAddress);
+    const isBingx = exchange === "bingx";
+
     const now = Date.now();
+
+    // Dla Aster nadal używamy prostego cache'u, dla BingX zawsze odświeżamy
     if (
+      !isBingx &&
       cachedAsterSymbols &&
       now - cachedAsterSymbolsAt < ASTER_SYMBOLS_TTL_MS
     ) {
       return res.json(cachedAsterSymbols);
     }
 
-    const info = await AsterSpotService.fetchExchangeInfo();
+    const info = isBingx
+      ? await BingXService.fetchExchangeInfo()
+      : await AsterSpotService.fetchExchangeInfo();
     const symbols = Array.isArray(info.symbols) ? info.symbols : [];
 
     const baseAssetsSet = new Set();
     const quoteAssetsSet = new Set();
 
     symbols.forEach((s) => {
-      if (s.baseAsset) baseAssetsSet.add(s.baseAsset);
-      if (s.quoteAsset) quoteAssetsSet.add(s.quoteAsset);
+      const base = s.baseAsset;
+      const quote = s.quoteAsset;
+
+      // Dla BingX bierzemy tylko pary kończące się na USDT
+      if (isBingx) {
+        if (quote === "USDT") {
+          // I tylko wybrane bazowe: BTC, ETH, BNB, SOL, XRP, TRX, DOGE, ASTER, LINK
+          const allowedBases = [
+            "BTC",
+            "ETH",
+            "BNB",
+            "SOL",
+            "XRP",
+            "TRX",
+            "DOGE",
+            "ASTER",
+            "LINK",
+          ];
+          const upperBase = (base || "").toUpperCase();
+          if (upperBase && allowedBases.includes(upperBase)) {
+            baseAssetsSet.add(upperBase);
+          }
+          quoteAssetsSet.add("USDT");
+        }
+      } else {
+        if (base) baseAssetsSet.add(base);
+        if (quote) quoteAssetsSet.add(quote);
+      }
     });
 
-    // Aster spot: jako stable obsługujemy tylko USDT
+    // Jako stable w UI obsługujemy tylko USDT
     const allQuoteAssets = Array.from(quoteAssetsSet).sort();
     const quoteAssets = allQuoteAssets.includes("USDT") ? ["USDT"] : [];
 
@@ -395,13 +433,16 @@ router.get("/aster/symbols", authMiddleware, async (req, res) => {
       quoteAssets,
     };
 
-    cachedAsterSymbols = payload;
-    cachedAsterSymbolsAt = now;
+    // Cache tylko dla Aster, bo BingX może się różnić między portfelami/kluczami
+    if (!isBingx) {
+      cachedAsterSymbols = payload;
+      cachedAsterSymbolsAt = now;
+    }
 
     res.json(payload);
   } catch (error) {
-    console.error("Error fetching Aster symbols:", error.message);
-    res.status(500).json({ error: "Failed to fetch Aster symbols" });
+    console.error("Error fetching symbols:", error.message);
+    res.status(500).json({ error: "Failed to fetch symbols" });
   }
 });
 
