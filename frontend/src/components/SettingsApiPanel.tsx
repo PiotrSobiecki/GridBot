@@ -24,7 +24,9 @@ type Props = {
 type Exchange = "asterdex" | "bingx";
 
 export default function SettingsApiPanel({ onClose }: Props) {
-  const { setUserSettings } = useStore();
+  const { setUserSettings } = useStore((state) => ({
+    setUserSettings: state.setUserSettings,
+  }));
   const [selectedExchange, setSelectedExchange] = useState<Exchange>("asterdex");
   const [activeTab, setActiveTab] = useState<"exchange" | "api">("exchange");
   

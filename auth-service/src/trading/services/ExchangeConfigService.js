@@ -25,19 +25,6 @@ export async function getExchangeForWallet(walletAddress) {
   }
 }
 
-/**
- * Zwraca serwis giełdy na podstawie nazwy.
- */
-export function getExchangeService(exchange) {
-  // Dynamiczny import, żeby uniknąć potencjalnych cykli
-  // Uwaga: wywołanie jest asynchroniczne.
-  return exchange === "bingx"
-    ? import("./BingXService.js")
-    : import("./AsterSpotService.js");
-}
-
 export default {
   getExchangeForWallet,
-  getExchangeService,
 };
-

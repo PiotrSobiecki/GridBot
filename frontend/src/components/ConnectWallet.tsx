@@ -15,7 +15,10 @@ declare global {
 
 export default function ConnectWallet() {
   const [isConnecting, setIsConnecting] = useState(false);
-  const { setAuth, setUserSettings } = useStore();
+  const { setAuth, setUserSettings } = useStore((state) => ({
+    setAuth: state.setAuth,
+    setUserSettings: state.setUserSettings,
+  }));
 
   const connectWallet = async () => {
     if (!window.ethereum) {

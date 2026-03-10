@@ -20,10 +20,14 @@ import pg from "pg";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
 
+import rateLimit from "express-rate-limit";
+
 // Routes
 import authRoutes from "./routes/auth.js";
 import settingsRoutes from "./routes/settings.js";
 import tradingRoutes from "./routes/trading.js";
+import swaggerSpec from "./swagger.js";
+import { getDocsHtml } from "./docs-html.js";
 
 // Trading services
 import * as PriceFeedService from "./trading/services/PriceFeedService.js";
@@ -110,8 +114,17 @@ app.use(
   })
 );
 
+// Rate limiting – ochrona endpointów auth przed brute-force
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minut
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, please try again later." },
+});
+
 // Routes
-app.use("/auth", authRoutes);
+app.use("/auth", authLimiter, authRoutes);
 app.use("/settings", settingsRoutes);
 app.use("/api/trading", tradingRoutes);
 
@@ -122,6 +135,16 @@ app.get("/health", (req, res) => {
     service: "gridbot-unified",
     features: ["auth", "settings", "trading", "price-feed"],
   });
+});
+
+// API docs – Swagger UI z przyciskiem Connect wallet (bez cache, zeby zawsze brac aktualna spec)
+app.get("/docs/openapi.json", (req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.json(swaggerSpec);
+});
+app.get(["/docs", "/docs/"], (req, res) => {
+  const baseUrl = (req.protocol + "://" + req.get("host")).replace(/\/$/, "");
+  res.type("html").send(getDocsHtml(baseUrl));
 });
 
 // Serve frontend static files – sprawdzamy kilka możliwych lokalizacji (dev z repo, docker, cwd)
@@ -153,7 +176,8 @@ if (frontendExists) {
       req.path.startsWith("/settings") ||
       req.path.startsWith("/api") ||
       req.path.startsWith("/health") ||
-      req.path.startsWith("/ws")
+      req.path.startsWith("/ws") ||
+      req.path.startsWith("/docs")
     ) {
       return next();
     }
@@ -168,6 +192,7 @@ if (frontendExists) {
     if (
       req.path.startsWith("/auth") ||
       req.path.startsWith("/settings") ||
+      req.path.startsWith("/docs") ||
       req.path.startsWith("/api") ||
       req.path.startsWith("/health") ||
       req.path.startsWith("/ws")
@@ -181,6 +206,19 @@ if (frontendExists) {
     });
   });
 }
+
+// Centralny error handler – łapie niezłapane błędy z route'ów
+app.use((err, req, res, _next) => {
+  console.error(`❌ Unhandled error on ${req.method} ${req.path}:`, err.message);
+  if (process.env.NODE_ENV !== "production") {
+    console.error(err.stack);
+  }
+  res.status(err.status || 500).json({
+    error: process.env.NODE_ENV === "production"
+      ? "Internal server error"
+      : err.message || "Internal server error",
+  });
+});
 
 // Initialize trading services (po załadowaniu .env)
 PriceFeedService.init(wss);

@@ -6,12 +6,18 @@ import { useStore } from "../store/useStore";
 import { api } from "../api";
 import type { WalletBalance } from "../types";
 
+const useWalletStore = () =>
+  useStore((state) => ({
+    walletAddress: state.walletAddress,
+    userSettings: state.userSettings,
+    prices: state.prices,
+    setUserSettings: state.setUserSettings,
+  }));
+
 interface WalletPanelProps {
   onClose: () => void;
 }
 
-// Mapowanie waluta → URL ikonki (zbliżone do oficjalnych logotypów).
-// Używamy publicznego CDN z logotypami kryptowalut.
 const getCurrencyIconUrl = (symbol: string): string | null => {
   const s = symbol.toUpperCase();
   switch (s) {
@@ -69,7 +75,7 @@ function CurrencyIconWithFallback({
 }
 
 export default function WalletPanel({ onClose }: WalletPanelProps) {
-  const { userSettings, setUserSettings, walletAddress, prices } = useStore();
+  const { userSettings, setUserSettings, walletAddress, prices } = useWalletStore();
   const [isEditing, setIsEditing] = useState(false);
   const [localWallet, setLocalWallet] = useState<WalletBalance[]>(
     userSettings?.wallet || [],
@@ -77,36 +83,11 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const loadBalances = async () => {
-    try {
-      if (!walletAddress) return;
-
-      const rawBalances = await api.getWalletBalances(walletAddress);
-
-      const wallet: WalletBalance[] = Object.entries(rawBalances).map(
-        ([currency, balance]) => ({
-          currency,
-          balance: parseFloat(balance as string) || 0,
-          reserved: 0,
-        }),
-      );
-
-      setLocalWallet(wallet);
-
-      if (userSettings) {
-        setUserSettings({ ...userSettings, wallet });
-      }
-    } catch (error) {
-      console.error("Failed to load Aster wallet balances:", error);
-      toast.error("Nie udało się pobrać sald z giełdy");
-    }
-  };
-
   const handleRefresh = async () => {
     if (!walletAddress) return;
     setIsRefreshing(true);
     try {
-      const rawBalances = await api.refreshWallet(walletAddress);
+      const rawBalances = await api.refreshWallet();
       const wallet: WalletBalance[] = Object.entries(rawBalances).map(
         ([currency, balance]) => ({
           currency,
@@ -133,7 +114,7 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
       try {
         if (!walletAddress) return;
 
-        const rawBalances = await api.getWalletBalances(walletAddress);
+        const rawBalances = await api.getWalletBalances();
 
         const wallet: WalletBalance[] = Object.entries(rawBalances).map(
           ([currency, balance]) => ({

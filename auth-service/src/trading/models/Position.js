@@ -31,8 +31,6 @@ export class Position {
     this.targetBuybackPrice = data.targetBuybackPrice ?? data.target_buyback_price;
     this.status = data.status || PositionStatus.OPEN;
     this.profit = data.profit ?? 0;
-    this.swingHighPrice = data.swingHighPrice ?? data.swing_high_price ?? null;
-    this.swingLowPrice = data.swingLowPrice ?? data.swing_low_price ?? null;
     this.createdAt = data.createdAt || data.created_at;
     this.closedAt = data.closedAt || data.closed_at;
   }
@@ -45,9 +43,9 @@ export class Position {
       INSERT OR REPLACE INTO positions (
         id, wallet_address, order_id, type, buy_price, buy_value,
         sell_price, sell_value, amount, trend_at_buy, target_sell_price,
-        target_buyback_price, status, profit, swing_high_price, swing_low_price,
+        target_buyback_price, status, profit,
         created_at, closed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     await stmt.run(
@@ -65,8 +63,6 @@ export class Position {
       this.targetBuybackPrice,
       this.status,
       this.profit,
-      this.swingHighPrice,
-      this.swingLowPrice,
       this.createdAt,
       this.closedAt
     );
@@ -92,7 +88,6 @@ export class Position {
     let query = 'SELECT * FROM positions WHERE wallet_address = ?';
     const params = [walletAddress];
 
-    // Jeśli podano orderId, filtruj po nim; jeśli null, zwróć wszystkie zlecenia danego portfela.
     if (orderId != null) {
       query += ' AND order_id = ?';
       params.push(orderId);
@@ -112,9 +107,6 @@ export class Position {
     return Position.findByWalletAndOrderId(walletAddress, orderId, PositionStatus.OPEN);
   }
 
-  /**
-   * Usuwa pozycję z bazy danych
-   */
   async delete() {
     const stmt = db.prepare('DELETE FROM positions WHERE id = ?');
     await stmt.run(this.id);
@@ -124,7 +116,6 @@ export class Position {
   /**
    * Zwraca łączny profit ze wszystkich ZAMKNIĘTYCH pozycji
    * dla danego portfela i zlecenia (long + short).
-   * Używane do spójnego wyliczania totalProfit w GridState.
    */
   static async getTotalClosedProfit(walletAddress, orderId) {
     const stmt = db.prepare(
@@ -150,8 +141,6 @@ export class Position {
       targetBuybackPrice: this.targetBuybackPrice,
       status: this.status,
       profit: this.profit,
-      swingHighPrice: this.swingHighPrice,
-      swingLowPrice: this.swingLowPrice,
       createdAt: this.createdAt,
       closedAt: this.closedAt
     };

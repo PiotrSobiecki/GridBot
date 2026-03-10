@@ -234,7 +234,6 @@ export default function OrderSettings({
         if (walletAddress && order._id) {
           try {
             const freshGridState = await api.getGridState(
-              walletAddress,
               order._id,
             );
             if (freshGridState) {
@@ -267,13 +266,13 @@ export default function OrderSettings({
     setIsStarting(true);
     try {
       if (gridState?.isActive) {
-        await api.stopGrid(walletAddress, order._id);
+        await api.stopGrid(order._id);
         setGridState(order._id, { ...gridState, isActive: false });
         toast.success("Zatrzymano algorytm");
       } else {
         let stateToUpdate: typeof gridState = gridState;
         if (!gridState) {
-          const state = await api.initGrid(walletAddress, {
+          const state = await api.initGrid({
             ...localOrder,
             id: order._id,
           });
@@ -281,7 +280,7 @@ export default function OrderSettings({
           stateToUpdate = state;
         }
 
-        await api.startGrid(walletAddress, order._id);
+        await api.startGrid(order._id);
         setGridState(order._id, { ...stateToUpdate!, isActive: true });
         toast.success("Uruchomiono algorytm");
       }
@@ -542,7 +541,7 @@ export default function OrderSettings({
                   // Jeśli cena nie jest w store, spróbuj pobrać z API
                   if (!currentPrice && walletAddress) {
                     try {
-                      const priceData = await api.getPrices(walletAddress);
+                      const priceData = await api.getPrices();
                       const priceInfo = priceData[symbol];
                       if (priceInfo) {
                         currentPrice =
@@ -564,7 +563,6 @@ export default function OrderSettings({
                   setLocalOrder((prev) => {
                     const updated = { ...prev } as any;
                     updated.baseAsset = v;
-                    // Aktualizuj focusPrice do aktualnej ceny wybranego krypto
                     if (currentPrice > 0) {
                       updated.focusPrice = currentPrice;
                     }
@@ -588,18 +586,15 @@ export default function OrderSettings({
                 value={localOrder.quoteAsset || localOrder.buy.currency}
                 options={quoteAssets}
                 onChange={async (v) => {
-                  // Pobierz aktualną cenę dla nowej pary BASE/QUOTE
                   const baseAsset =
                     localOrder.baseAsset || localOrder.sell?.currency || "BTC";
                   const symbol = `${baseAsset}${v}`;
 
-                  // Spróbuj pobrać cenę ze store
                   let currentPrice = prices[symbol]?.price || 0;
 
-                  // Jeśli cena nie jest w store, spróbuj pobrać z API
                   if (!currentPrice && walletAddress) {
                     try {
-                      const priceData = await api.getPrices(walletAddress);
+                      const priceData = await api.getPrices();
                       const priceInfo = priceData[symbol];
                       if (priceInfo) {
                         currentPrice =

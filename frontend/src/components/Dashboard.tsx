@@ -236,7 +236,7 @@ export default function Dashboard() {
 
     const loadAllGridStates = async () => {
       try {
-        const states = await api.getGridStates(walletAddress);
+        const states = await api.getGridStates();
         if (Array.isArray(states)) {
           states.forEach((s: any) => {
             if (s && s.orderId) {
@@ -268,7 +268,7 @@ export default function Dashboard() {
     refetchInterval: priceRefreshIntervalMs,
     queryFn: async () => {
       if (!walletAddress) return {};
-      const priceData = await api.getPrices(walletAddress);
+      const priceData = await api.getPrices();
       Object.entries(priceData as Record<string, any>).forEach(
         ([symbol, data]) => {
           let numPrice: number;
@@ -304,7 +304,6 @@ export default function Dashboard() {
     const refreshGridState = async () => {
       try {
         const state = await api.getGridState(
-          walletAddress,
           activeOrder._id || "",
         );
         if (state) setGridState(activeOrder._id || "", state);
@@ -333,7 +332,7 @@ export default function Dashboard() {
       // Jeśli cena nie jest w store, spróbuj pobrać z API
       if (!currentPrice && walletAddress) {
         try {
-          const priceData = await api.getPrices(walletAddress);
+          const priceData = await api.getPrices();
           const priceInfo = priceData[symbol];
           if (priceInfo) {
             currentPrice =

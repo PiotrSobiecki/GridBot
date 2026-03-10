@@ -17,7 +17,10 @@ export default function OrderTabs({
   onSelect,
   gridStates,
 }: OrderTabsProps) {
-  const { positions, prices } = useStore();
+  const { positions, prices } = useStore((state) => ({
+    positions: state.positions,
+    prices: state.prices,
+  }));
 
   if (orders.length === 0) {
     return (

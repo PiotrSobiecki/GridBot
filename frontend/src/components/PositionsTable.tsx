@@ -21,7 +21,13 @@ interface PositionsTableProps {
 
 export default function PositionsTable({ orderId }: PositionsTableProps) {
   const { walletAddress, positions, setPositions, prices, userSettings } =
-    useStore();
+    useStore((state) => ({
+      walletAddress: state.walletAddress,
+      positions: state.positions,
+      setPositions: state.setPositions,
+      prices: state.prices,
+      userSettings: state.userSettings,
+    }));
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"buy" | "sell">("buy");
   const [deletingPositionId, setDeletingPositionId] = useState<string | null>(
@@ -83,7 +89,7 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
 
     setIsLoading(true);
     try {
-      const data = await api.getPositions(walletAddress, orderId);
+      const data = await api.getPositions(orderId);
       setPositions(orderId, data);
     } catch (error) {
       console.error("Failed to fetch positions:", error);
@@ -98,12 +104,12 @@ export default function PositionsTable({ orderId }: PositionsTableProps) {
     setDeletingPositionId(positionId);
     setShowDeleteFinalConfirm(null);
     try {
-      await api.deletePosition(walletAddress, positionId);
+      await api.deletePosition(positionId);
       // Odśwież listę pozycji
       await fetchPositions();
     } catch (error) {
       console.error("Failed to delete position:", error);
-      alert("Nie udało się usunąć pozycji");
+      toast.error("Nie udało się usunąć pozycji");
     } finally {
       setDeletingPositionId(null);
     }

@@ -1,3 +1,11 @@
+import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
+
 import express from "express";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
@@ -447,16 +455,16 @@ router.delete("/orders/:orderId", authMiddleware, async (req, res) => {
           client.release();
         }
       } else {
-        // SQLite – prosty BEGIN/COMMIT w jednym ciągu SQL
-        const safeOrderId = String(orderId).replace(/'/g, "''");
-        const safeWallet = String(lowerWallet).replace(/'/g, "''");
-        await db.exec(`
-          BEGIN;
-          DELETE FROM orders WHERE id = '${safeOrderId}';
-          DELETE FROM grid_states WHERE wallet_address = '${safeWallet}' AND order_id = '${safeOrderId}';
-          DELETE FROM positions  WHERE wallet_address = '${safeWallet}' AND order_id = '${safeOrderId}';
-          COMMIT;
-        `);
+        const deleteOrder = db.prepare("DELETE FROM orders WHERE id = ?");
+        const deleteGridStates = db.prepare("DELETE FROM grid_states WHERE wallet_address = ? AND order_id = ?");
+        const deletePositions = db.prepare("DELETE FROM positions WHERE wallet_address = ? AND order_id = ?");
+
+        const deleteAll = db.transaction(() => {
+          deleteOrder.run(orderId);
+          deleteGridStates.run(lowerWallet, orderId);
+          deletePositions.run(lowerWallet, orderId);
+        });
+        deleteAll();
         console.log(
           `🧹 Deleted order, GRID state and positions in one transaction for order=${orderId}`,
         );

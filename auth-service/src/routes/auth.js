@@ -1,7 +1,14 @@
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
 import express from 'express';
 import { SiweMessage, generateNonce } from 'siwe';
 import jwt from 'jsonwebtoken';
-// Use SQLite models instead of MongoDB
 import User from '../trading/models/User.js';
 import UserSettings from '../trading/models/UserSettings.js';
 
@@ -110,29 +117,30 @@ router.post('/verify', async (req, res) => {
       walletAddress
     });
   } catch (error) {
-    console.error('Verification error:', error);
-    res.status(500).json({ error: 'Verification failed' });
+    console.error('Verification error:', error?.message || error);
+    if (error?.stack) console.error(error.stack);
+    const message = process.env.NODE_ENV === 'production'
+      ? 'Verification failed'
+      : (error?.message || String(error));
+    res.status(500).json({ error: message });
   }
 });
 
-// Sprawdź sesję
+// Sprawdź sesję – zawsze 200, w body stan (authenticated: true/false)
 router.get('/session', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
-    
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ authenticated: false });
+      return res.json({ authenticated: false });
     }
-
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, JWT_SECRET);
-    
     res.json({
       authenticated: true,
       walletAddress: decoded.walletAddress
     });
   } catch (error) {
-    res.status(401).json({ authenticated: false });
+    res.json({ authenticated: false });
   }
 });
 
