@@ -273,8 +273,10 @@ export default function Dashboard() {
         ([symbol, data]) => {
           let numPrice: number;
           let changePercent: number | null = null;
+          let rawPrice: string | number | null = null;
 
           if (typeof data === "object" && data !== null && "price" in data) {
+            rawPrice = data.price;
             numPrice =
               typeof data.price === "string"
                 ? parseFloat(data.price)
@@ -284,12 +286,13 @@ export default function Dashboard() {
                 ? Number(data.priceChangePercent)
                 : null;
           } else {
+            rawPrice = data;
             numPrice =
               typeof data === "string" ? parseFloat(data) : Number(data);
           }
 
           if (!isNaN(numPrice) && numPrice > 0) {
-            updatePrice(symbol, numPrice, changePercent);
+            (updatePrice as any)(symbol, numPrice, changePercent, rawPrice);
           }
         },
       );
@@ -419,14 +422,28 @@ export default function Dashboard() {
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   };
 
-  const formatPrice = (v: number | undefined | null) =>
-    v != null && !Number.isNaN(v)
-      ? "$" +
-        Number(v).toLocaleString("en-US", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })
-      : "—";
+  const formatPrice = (v: number | undefined | null) => {
+    if (v == null || Number.isNaN(v)) return "—";
+    const n = Number(v);
+    if (n <= 0) return "$0.00";
+
+    // Bardzo małe wartości (np. MED) – 8 miejsc po przecinku (żeby nie „zjadać” cyfr),
+    // potem 4, a dopiero powyżej 1 – klasyczne 2 miejsca.
+    if (n < 0.01) {
+      return `$${n.toFixed(8)}`;
+    }
+    if (n < 1) {
+      return `$${n.toFixed(4)}`;
+    }
+
+    return (
+      "$" +
+      n.toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
+    );
+  };
 
   return (
     <div className="min-h-screen flex flex-col">

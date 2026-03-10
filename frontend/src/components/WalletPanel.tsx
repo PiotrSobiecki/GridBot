@@ -35,6 +35,8 @@ const getCurrencyIconUrl = (symbol: string): string | null => {
       return "https://cryptologos.cc/logos/solana-sol-logo.svg?v=032";
     case "ASTER":
       return "https://assets.coingecko.com/coins/images/69040/standard/_ASTER.png?1757326782";
+    case "MED":
+      return "https://static-app.bb-os.com/icon/MED.png";
     case "USDC":
       return "https://cryptologos.cc/logos/usd-coin-usdc-logo.svg?v=032";
 

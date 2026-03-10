@@ -22,7 +22,12 @@ interface AppState {
   logout: () => void;
   setUserSettings: (settings: UserSettings) => void;
   setActiveOrderIndex: (index: number) => void;
-  updatePrice: (symbol: string, price: number, priceChangePercent?: number | null) => void;
+  updatePrice: (
+    symbol: string,
+    price: number,
+    priceChangePercent?: number | null,
+    rawPrice?: string | number | null,
+  ) => void;
   setGridState: (orderId: string, state: GridState) => void;
   setPositions: (orderId: string, positions: Position[]) => void;
   addOrder: (order: OrderSettings) => void;
@@ -65,12 +70,25 @@ export const useStore = create<AppState>()(
       setActiveOrderIndex: (index) => set({ activeOrderIndex: index }),
       
       // Price actions
-      updatePrice: (symbol, price, priceChangePercent?: number | null) => set((state) => ({
-        prices: {
-          ...state.prices,
-          [symbol]: { symbol, price, timestamp: Date.now(), priceChangePercent }
-        }
-      })),
+      // price = wartość liczbowa do obliczeń, rawPrice = oryginalny string z API (z zachowanymi zerami)
+      updatePrice: (
+        symbol,
+        price,
+        priceChangePercent?: number | null,
+        rawPrice?: string | number | null,
+      ) =>
+        set((state) => ({
+          prices: {
+            ...state.prices,
+            [symbol]: {
+              symbol,
+              price,
+              rawPrice: rawPrice ?? price,
+              timestamp: Date.now(),
+              priceChangePercent,
+            },
+          },
+        })),
       
       // Grid state actions
       setGridState: (orderId, gridState) => set((state) => ({

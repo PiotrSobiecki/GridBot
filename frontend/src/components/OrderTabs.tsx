@@ -81,16 +81,12 @@ export default function OrderTabs({
         const quoteAsset =
           order.quoteAsset || (order as any).buy?.currency || "USDT";
         const symbol = `${baseAsset}${quoteAsset}`;
-        const rawPrice = prices[symbol]?.price;
-        const numericPrice =
-          typeof rawPrice === "number"
-            ? rawPrice
-            : rawPrice != null
-              ? Number(rawPrice)
-              : 0;
+        const priceData = prices[symbol];
+        const raw =
+          (priceData as any)?.rawPrice ?? priceData?.price ?? null;
         const priceLabel =
-          numericPrice && !Number.isNaN(numericPrice)
-            ? `$${Math.round(numericPrice).toLocaleString("en-US")}`
+          raw != null && !Number.isNaN(Number(raw)) && Number(raw) > 0
+            ? `$${String(raw)}`
             : "—";
 
         return (

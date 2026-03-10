@@ -507,6 +507,7 @@ const DEFAULT_TICKER_SYMBOLS = [
   "DOGE-USDT",
   "ASTER-USDT",
   "LINK-USDT",
+  "MED-USDT",
 ];
 
 // Cache listy symboli, żeby nie pytać exchangeInfo przy każdym odświeżeniu cen
@@ -532,9 +533,20 @@ async function getTickerSymbols() {
       (s) => s.quoteAsset && s.quoteAsset.toUpperCase() === "USDT",
     );
 
-// Ograniczamy się tylko do wybranych krypto:
-// BTC, ETH, BNB, SOL, XRP, TRON (TRX), DOGE, ASTER, LINK
-const allowedBases = ["BTC", "ETH", "BNB", "SOL", "XRP", "TRX", "DOGE", "ASTER", "LINK"];
+    // Ograniczamy się tylko do wybranych krypto:
+    // BTC, ETH, BNB, SOL, XRP, TRON (TRX), DOGE, ASTER, LINK, MED
+    const allowedBases = [
+      "BTC",
+      "ETH",
+      "BNB",
+      "SOL",
+      "XRP",
+      "TRX",
+      "DOGE",
+      "ASTER",
+      "LINK",
+      "MED",
+    ];
     const filtered = usdtPairs.filter((s) =>
       allowedBases.includes((s.baseAsset || "").toUpperCase()),
     );

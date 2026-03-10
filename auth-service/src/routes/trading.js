@@ -399,7 +399,7 @@ router.get("/aster/symbols", authMiddleware, async (req, res) => {
       // Dla BingX bierzemy tylko pary kończące się na USDT
       if (isBingx) {
         if (quote === "USDT") {
-          // I tylko wybrane bazowe: BTC, ETH, BNB, SOL, XRP, TRX, DOGE, ASTER, LINK
+          // I tylko wybrane bazowe: BTC, ETH, BNB, SOL, XRP, TRX, DOGE, ASTER, LINK, MED
           const allowedBasesBingx = [
             "BTC",
             "ETH",
@@ -410,6 +410,7 @@ router.get("/aster/symbols", authMiddleware, async (req, res) => {
             "DOGE",
             "ASTER",
             "LINK",
+            "MED",
           ];
           const upperBase = (base || "").toUpperCase();
           if (upperBase && allowedBasesBingx.includes(upperBase)) {

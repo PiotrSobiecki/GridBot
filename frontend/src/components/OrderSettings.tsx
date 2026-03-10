@@ -671,26 +671,14 @@ export default function OrderSettings({
                         "USDT";
                       const symbol = `${baseAsset}${quoteAsset}`;
                       const priceData = prices[symbol];
-                      const price =
-                        typeof priceData?.price === "number"
-                          ? priceData.price
-                          : Number(priceData?.price || 0);
+                      const raw =
+                        (priceData as any)?.rawPrice ?? priceData?.price ?? null;
 
-                      if (!baseAsset || price === 0) {
+                      if (!baseAsset || raw == null) {
                         return "—";
                       }
-
-                      // Formatowanie w zależności od symbolu
-                      if (symbol.includes("DOGE") || symbol.includes("SHIB")) {
-                        return `$${price.toFixed(5)}`;
-                      }
-                      if (price < 1) {
-                        return `$${price.toFixed(4)}`;
-                      }
-                      return `$${price.toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}`;
+                      // W zleceniu pokazujemy dokładnie taką cenę, jaką zwróciło API (łącznie z zerami)
+                      return `$${String(raw)}`;
                     })()}
                   </span>
                   <Activity className="w-4 h-4 text-gray-500" />

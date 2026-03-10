@@ -46,7 +46,8 @@ if (!QUIET_PRODUCTION_LOGS) {
  * Główny serwis implementujący algorytm GRID
  */
 
-const PRICE_SCALE = 2;
+const PRICE_SCALE = 2;       // dla "dużych" cen (>= 1 USDT)
+const PRICE_SCALE_SMALL = 8; // dla małych cen (< 1 USDT), np. MED
 const AMOUNT_SCALE = 8;
 const DEFAULT_FEE_PERCENT = new Decimal("0");
 
@@ -818,7 +819,10 @@ async function executeBuy(currentPrice, state, settings) {
 
   const targetSellPrice = currentPrice
     .mul(Decimal.add(1, profitPercent.div(100)))
-    .toDecimalPlaces(PRICE_SCALE, Decimal.ROUND_UP);
+    .toDecimalPlaces(
+      currentPrice.lt(1) ? PRICE_SCALE_SMALL : PRICE_SCALE,
+      Decimal.ROUND_UP,
+    );
 
   // Oblicz oczekiwany profit
   const expectedProfit = targetSellPrice.minus(currentPrice).mul(amount);
@@ -1795,7 +1799,10 @@ async function executeSellShort(currentPrice, state, settings) {
 
   const targetBuybackPrice = currentPrice
     .mul(Decimal.sub(1, profitPercent.div(100)))
-    .toDecimalPlaces(PRICE_SCALE, Decimal.ROUND_DOWN);
+    .toDecimalPlaces(
+      currentPrice.lt(1) ? PRICE_SCALE_SMALL : PRICE_SCALE,
+      Decimal.ROUND_DOWN,
+    );
 
   const expectedProfit = currentPrice.minus(targetBuybackPrice).mul(amount);
 
@@ -2566,7 +2573,10 @@ export function calculateNextBuyTarget(focusPrice, trend, settings) {
   const trendPercent = getTrendPercent(trend, settings, true);
 
   const decrease = fp.mul(trendPercent).div(100);
-  return fp.minus(decrease).toDecimalPlaces(PRICE_SCALE, Decimal.ROUND_DOWN);
+  const result = fp.minus(decrease);
+  // Dla małych cen (< 1 USDT) używamy większej precyzji, żeby nie zaokrąglać do 0
+  const scale = fp.lt(1) ? PRICE_SCALE_SMALL : PRICE_SCALE;
+  return result.toDecimalPlaces(scale, Decimal.ROUND_DOWN);
 }
 
 /**
@@ -2577,7 +2587,10 @@ export function calculateNextSellTarget(focusPrice, trend, settings) {
   const trendPercent = getTrendPercent(trend, settings, false);
 
   const increase = fp.mul(trendPercent).div(100);
-  return fp.plus(increase).toDecimalPlaces(PRICE_SCALE, Decimal.ROUND_UP);
+  const result = fp.plus(increase);
+  // Dla małych cen (< 1 USDT) używamy większej precyzji, żeby nie zaokrąglać do 0
+  const scale = fp.lt(1) ? PRICE_SCALE_SMALL : PRICE_SCALE;
+  return result.toDecimalPlaces(scale, Decimal.ROUND_UP);
 }
 
 /**

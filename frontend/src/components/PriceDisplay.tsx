@@ -36,7 +36,13 @@ export default function PriceDisplay() {
       .getAsterSymbols()
       .then((data: any) => {
         if (Array.isArray(data.baseAssets) && data.baseAssets.length > 0) {
-          setBaseAssets(data.baseAssets);
+          // Na pasku nie pokazujemy MED – nawet jeśli jest dostępny na BingX,
+          // służy tylko do tradingu.
+          setBaseAssets(
+            data.baseAssets.filter(
+              (asset: string) => asset.toUpperCase() !== "MED",
+            ),
+          );
         }
       })
       .catch((err) => {
