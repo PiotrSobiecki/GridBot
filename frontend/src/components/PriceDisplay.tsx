@@ -29,7 +29,8 @@ export default function PriceDisplay() {
     "BNB",
   ]);
 
-  // Pobierz listę dostępnych BASE/QUOTE z backendu (exchangeInfo z AsterDex)
+  // Pobierz listę dostępnych BASE/QUOTE z backendu (exchangeInfo),
+  // i odśwież ją także przy zmianie giełdy w ustawieniach użytkownika.
   useEffect(() => {
     api
       .getAsterSymbols()
@@ -39,9 +40,9 @@ export default function PriceDisplay() {
         }
       })
       .catch((err) => {
-        console.error("❌ Failed to load Aster symbols for price ticker:", err);
+        console.error("❌ Failed to load symbols for price ticker:", err);
       });
-  }, []);
+  }, [userSettings?.exchange]);
 
   const formatPrice = (symbol: string, price: number | string) => {
     const numPrice = typeof price === "string" ? parseFloat(price) : price;

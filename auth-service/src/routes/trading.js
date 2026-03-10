@@ -400,7 +400,7 @@ router.get("/aster/symbols", authMiddleware, async (req, res) => {
       if (isBingx) {
         if (quote === "USDT") {
           // I tylko wybrane bazowe: BTC, ETH, BNB, SOL, XRP, TRX, DOGE, ASTER, LINK
-          const allowedBases = [
+          const allowedBasesBingx = [
             "BTC",
             "ETH",
             "BNB",
@@ -412,14 +412,21 @@ router.get("/aster/symbols", authMiddleware, async (req, res) => {
             "LINK",
           ];
           const upperBase = (base || "").toUpperCase();
-          if (upperBase && allowedBases.includes(upperBase)) {
+          if (upperBase && allowedBasesBingx.includes(upperBase)) {
             baseAssetsSet.add(upperBase);
           }
           quoteAssetsSet.add("USDT");
         }
       } else {
-        if (base) baseAssetsSet.add(base);
-        if (quote) quoteAssetsSet.add(quote);
+        // AsterDex – też ograniczamy listę do BTC, ETH, BNB i ASTER
+        const allowedBasesAster = ["BTC", "ETH", "BNB", "ASTER"];
+        const upperBase = (base || "").toUpperCase();
+        if (upperBase && allowedBasesAster.includes(upperBase)) {
+          baseAssetsSet.add(upperBase);
+        }
+        if (quote && quote.toUpperCase() === "USDT") {
+          quoteAssetsSet.add("USDT");
+        }
       }
     });
 

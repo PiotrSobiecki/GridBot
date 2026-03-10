@@ -135,7 +135,8 @@ export default function OrderSettings({
     localOrder.buy?.currency,
   ]);
 
-  // Ładuj listę par z backendu (exchangeInfo z AsterDex) – fallback do domyślnej listy przy błędzie.
+  // Ładuj listę par z backendu (exchangeInfo) – fallback do domyślnej listy przy błędzie.
+  // Odśwież także przy zmianie giełdy w ustawieniach użytkownika.
   useEffect(() => {
     api
       .getAsterSymbols()
@@ -148,10 +149,29 @@ export default function OrderSettings({
         }
       })
       .catch((err: any) => {
-        console.error("Failed to load Aster symbols:", err);
+        console.error("Failed to load symbols:", err);
         toast.error("Nie udało się pobrać listy par z giełdy");
       });
-  }, []);
+  }, [userSettings?.exchange]);
+
+  // Jeśli po zmianie giełdy aktualny baseAsset nie jest już na liście dostępnych,
+  // ustaw pierwszy dostępny (żeby nie zostawał symbol z poprzedniej giełdy).
+  useEffect(() => {
+    if (!localOrder || baseAssets.length === 0) return;
+    if (!localOrder.baseAsset) return;
+
+    if (!baseAssets.includes(localOrder.baseAsset)) {
+      setLocalOrder((prev) =>
+        prev
+          ? {
+              ...prev,
+              baseAsset: baseAssets[0],
+              sell: { ...(prev.sell || {}), currency: baseAssets[0] },
+            }
+          : prev,
+      );
+    }
+  }, [userSettings?.exchange, baseAssets]);
 
   const toggleSection = (section: Section) => {
     const newSections = new Set(expandedSections);
