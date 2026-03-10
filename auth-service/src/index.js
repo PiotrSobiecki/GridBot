@@ -34,6 +34,10 @@ import * as PriceFeedService from "./trading/services/PriceFeedService.js";
 import * as GridSchedulerService from "./trading/services/GridSchedulerService.js";
 
 const app = express();
+
+// Załóż, że jesteśmy za proxy (np. Railway, Heroku) – wtedy req.protocol
+// będzie poprawnie odczytywać X-Forwarded-Proto (http/https).
+app.set("trust proxy", 1);
 const server = createServer(app);
 const PORT = process.env.PORT || 3001;
 
