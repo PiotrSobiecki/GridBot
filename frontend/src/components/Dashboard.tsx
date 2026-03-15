@@ -10,6 +10,8 @@ import {
   DollarSign,
   BarChart3,
   Zap,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useQuery } from "@tanstack/react-query";
@@ -95,7 +97,10 @@ export default function Dashboard() {
     gridStates,
     logout,
     positions,
+    setPositions,
     updatePrice,
+    orderSequence,
+    setOrderSequence,
   } = useStore((state) => ({
     walletAddress: state.walletAddress,
     userSettings: state.userSettings,
@@ -106,12 +111,16 @@ export default function Dashboard() {
     gridStates: state.gridStates,
     logout: state.logout,
     positions: state.positions,
+    setPositions: state.setPositions,
     updatePrice: state.updatePrice,
+    orderSequence: state.orderSequence,
+    setOrderSequence: state.setOrderSequence,
   }));
 
   const [showWallet, setShowWallet] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showApiSettings, setShowApiSettings] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [apiProfile, setApiProfile] = useState<{
     name?: string;
     avatar?: string;
@@ -119,8 +128,17 @@ export default function Dashboard() {
     exchange?: "asterdex" | "bingx";
   } | null>(null);
 
-  // useMemo zapobiega tworzeniu nowej referencji tablicy przy każdym renderze
-  const orders = useMemo(() => userSettings?.orders || [], [userSettings?.orders]);
+  // Sortuj zlecenia wg zapisanej sekwencji (drag & drop), fallback do oryginalnej kolejności
+  const rawOrders = useMemo(() => userSettings?.orders || [], [userSettings?.orders]);
+  const orders = useMemo(() => {
+    if (orderSequence.length === 0) return rawOrders;
+    const seqMap = new Map(orderSequence.map((id, i) => [id, i]));
+    return [...rawOrders].sort((a, b) => {
+      const ia = seqMap.has(a._id ?? "") ? seqMap.get(a._id ?? "")! : 9999;
+      const ib = seqMap.has(b._id ?? "") ? seqMap.get(b._id ?? "")! : 9999;
+      return ia - ib;
+    });
+  }, [rawOrders, orderSequence]);
   // Użyj useMemo żeby activeOrder reagował na zmiany w orders (np. po zapisaniu)
   // Tworzymy nowy obiekt żeby React wykrył zmianę referencji
   const activeOrder = useMemo(() => {
@@ -215,43 +233,30 @@ export default function Dashboard() {
   useEffect(() => {
     if (!walletAddress) return;
 
+    // Ładuj zlecenia i stany gridów razem – żeby nie było race condition
+    // między order.isActive (z DB) a gridStates[id].isActive (rzeczywisty stan)
     const refreshOrders = async () => {
       try {
-        const updatedSettings = await api.getSettings();
+        const [updatedSettings, states] = await Promise.all([
+          api.getSettings(),
+          api.getGridStates().catch(() => []),
+        ]);
         setUserSettings(updatedSettings);
+        if (Array.isArray(states)) {
+          states.forEach((s: any) => {
+            if (s && s.orderId) setGridState(s.orderId, s);
+          });
+        }
         console.log(
-          `🔄 Refreshed orders after exchange change: ${updatedSettings.orders?.length || 0} orders for ${updatedSettings.exchange}`,
+          `🔄 Refreshed orders (${updatedSettings.orders?.length || 0}) + grid states (${states?.length || 0}) for ${updatedSettings.exchange}`,
         );
       } catch (e) {
-        console.error("Failed to refresh orders after exchange change:", e);
+        console.error("Failed to refresh orders/grid states:", e);
       }
     };
 
     refreshOrders();
-  }, [walletAddress, userSettings?.exchange, setUserSettings]);
-
-  // Po starcie pobierz wszystkie stany GRID z backendu,
-  // żeby zakładki znały realny isActive nawet po odświeżeniu strony.
-  useEffect(() => {
-    if (!walletAddress) return;
-
-    const loadAllGridStates = async () => {
-      try {
-        const states = await api.getGridStates();
-        if (Array.isArray(states)) {
-          states.forEach((s: any) => {
-            if (s && s.orderId) {
-              setGridState(s.orderId, s);
-            }
-          });
-        }
-      } catch (e) {
-        // cicho ignoruj, jeśli endpoint niedostępny
-      }
-    };
-
-    loadAllGridStates();
-  }, [walletAddress, setGridState]);
+  }, [walletAddress, userSettings?.exchange, setUserSettings, setGridState]);
   // Pobieranie cen: co min(refreshInterval) ze wszystkich zleceń (przy 30s i 60s → co 30s)
   const allIntervals = orders
     .map((o) => Number(o?.refreshInterval) || 5)
@@ -403,9 +408,7 @@ export default function Dashboard() {
 
     const refreshGridState = async () => {
       try {
-        const state = await api.getGridState(
-          activeOrder._id || "",
-        );
+        const state = await api.getGridState(activeOrder._id || "");
         if (state) setGridState(activeOrder._id || "", state);
       } catch (err) {
         // cicho ignoruj (np. grid jeszcze nie istnieje)
@@ -416,6 +419,34 @@ export default function Dashboard() {
     const interval = setInterval(refreshGridState, gridRefreshIntervalMs);
     return () => clearInterval(interval);
   }, [walletAddress, activeOrder?._id, setGridState, gridRefreshIntervalMs]);
+
+  // Pobierz pozycje dla WSZYSTKICH zleceń – żeby kafelki w sidebarze
+  // pokazywały poprawną liczbę i wartość otwartych pozycji.
+  // Odświeżaj co 30 sekund (tyle samo co PositionsTable dla aktywnego zlecenia).
+  useEffect(() => {
+    if (!walletAddress || orders.length === 0) return;
+
+    const POSITIONS_REFRESH_MS = 30_000;
+
+    const refreshAllPositions = async () => {
+      await Promise.allSettled(
+        orders.map(async (order) => {
+          const id = order._id;
+          if (!id) return;
+          try {
+            const data = await api.getPositions(id);
+            setPositions(id, data);
+          } catch {
+            // cicho – nie blokuj pozostałych
+          }
+        }),
+      );
+    };
+
+    refreshAllPositions();
+    const interval = setInterval(refreshAllPositions, POSITIONS_REFRESH_MS);
+    return () => clearInterval(interval);
+  }, [walletAddress, orders, setPositions]);
 
   const handleAddOrder = async () => {
     try {
@@ -502,6 +533,16 @@ export default function Dashboard() {
       toast.error(error.message || "Błąd duplikowania zlecenia");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleReorder = (reorderedOrders: typeof orders) => {
+    // Zapisz nową kolejność jako tablicę ID w persisted store
+    const newSequence = reorderedOrders.map((o) => o._id ?? "");
+    setOrderSequence(newSequence);
+    // Aktualizuj też userSettings żeby activeOrderIndex był poprawny
+    if (userSettings) {
+      setUserSettings({ ...userSettings, orders: reorderedOrders });
     }
   };
 
@@ -642,24 +683,44 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4 sm:gap-6">
           {/* Left Sidebar - Order Tabs */}
           <div className="col-span-1 md:col-span-2 order-1 md:order-1">
-            <div className="bg-grid-card rounded-xl border border-grid-border p-3 sm:p-4 sticky top-16 md:top-24">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="font-semibold text-gray-300">Zlecenia</h2>
+            <div className="bg-grid-card rounded-xl border border-grid-border sticky top-16 md:top-24 overflow-hidden">
+              {/* Nagłówek panelu */}
+              <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 border-b border-grid-border">
+                <button
+                  className="flex items-center gap-2 flex-1 text-left"
+                  onClick={() => setSidebarCollapsed((c) => !c)}
+                  title={sidebarCollapsed ? "Rozwiń panel zleceń" : "Zwiń panel zleceń"}
+                >
+                  <h2 className="font-semibold text-gray-300 text-sm">Zlecenia</h2>
+                  <span className="text-xs text-gray-500">({orders.length})</span>
+                  {sidebarCollapsed ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-gray-500 ml-auto" />
+                  ) : (
+                    <ChevronUp className="w-3.5 h-3.5 text-gray-500 ml-auto" />
+                  )}
+                </button>
                 <button
                   onClick={handleAddOrder}
                   disabled={isLoading}
-                  className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors disabled:opacity-50"
+                  className="ml-2 p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors disabled:opacity-50 flex-shrink-0"
+                  title="Dodaj zlecenie"
                 >
                   <Plus className="w-4 h-4" />
                 </button>
               </div>
 
-              <OrderTabs
-                orders={orders}
-                activeIndex={activeOrderIndex}
-                onSelect={setActiveOrderIndex}
-                gridStates={gridStates}
-              />
+              {/* Lista kart – zwijalna */}
+              {!sidebarCollapsed && (
+                <div className="p-2 sm:p-3">
+                  <OrderTabs
+                    orders={orders}
+                    activeIndex={activeOrderIndex}
+                    onSelect={setActiveOrderIndex}
+                    onReorder={handleReorder}
+                    gridStates={gridStates}
+                  />
+                </div>
+              )}
             </div>
           </div>
 

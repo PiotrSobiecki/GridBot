@@ -1476,6 +1476,67 @@ export default function OrderSettings({
           </div>
         </SettingsSection>
       </div>
+
+      {/* Dolny pasek akcji pod swingiem – te same przyciski co w headerze */}
+      <div className="px-3 sm:px-4 pb-3 sm:pb-4 pt-3 border-t border-grid-border flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-500">
+          <span>Stan zlecenia:</span>
+          <span
+            className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${
+              isRunning
+                ? "bg-emerald-500/10 text-emerald-400"
+                : "bg-gray-500/10 text-gray-400"
+            }`}
+          >
+            {isRunning ? "Aktywny" : "Wstrzymany"}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap w-full sm:w-auto">
+          <button
+            onClick={handleStartStop}
+            disabled={isStarting}
+            className={`flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors ${
+              isRunning
+                ? "bg-red-500/20 text-red-400 hover:bg-red-500/30"
+                : "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30"
+            }`}
+          >
+            {isRunning ? (
+              <>
+                <Pause className="w-3 h-3 sm:w-4 sm:h-4" />
+                <span className="hidden sm:inline">Stop</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-3 h-3 sm:w-4 sm:h-4" />
+                <span className="hidden sm:inline">Start</span>
+              </>
+            )}
+          </button>
+
+          <button
+            onClick={() => setShowSaveConfirm(true)}
+            disabled={isSaving}
+            className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 text-xs sm:text-sm font-medium transition-colors"
+          >
+            <Save className="w-3 h-3 sm:w-4 sm:h-4" />
+            <span className="hidden sm:inline">Zapisz</span>
+          </button>
+
+          {onDuplicate && (
+            <button
+              onClick={onDuplicate}
+              className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-gray-500/20 text-gray-300 hover:bg-gray-500/30 text-xs sm:text-sm font-medium transition-colors"
+              title="Duplikuj zlecenie"
+            >
+              <Copy className="w-3 h-3 sm:w-4 sm:h-4" />
+              <span className="hidden sm:inline">Duplikuj</span>
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Modale potwierdzeń zapisu/usunięcia */}
       <AnimatePresence>
         {showSaveConfirm && (

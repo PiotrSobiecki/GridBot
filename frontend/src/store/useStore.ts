@@ -16,7 +16,10 @@ interface AppState {
   prices: Record<string, PriceData>;
   gridStates: Record<string, GridState>;
   positions: Record<string, Position[]>;
-  
+
+  // Niestandardowa kolejność zleceń (przechowywana lokalnie, persisted)
+  orderSequence: string[];
+
   // Actions
   setAuth: (walletAddress: string, token: string) => void;
   logout: () => void;
@@ -33,6 +36,7 @@ interface AppState {
   addOrder: (order: OrderSettings) => void;
   updateOrder: (orderId: string, updates: Partial<OrderSettings>) => void;
   deleteOrder: (orderId: string) => void;
+  setOrderSequence: (sequence: string[]) => void;
 }
 
 export const useStore = create<AppState>()(
@@ -47,6 +51,7 @@ export const useStore = create<AppState>()(
       prices: {},
       gridStates: {},
       positions: {},
+      orderSequence: [],
       
       // Auth actions
       setAuth: (walletAddress, token) => set({
@@ -136,14 +141,17 @@ export const useStore = create<AppState>()(
             orders: state.userSettings.orders.filter(order => order._id !== orderId)
           }
         };
-      })
+      }),
+
+      setOrderSequence: (sequence) => set({ orderSequence: sequence }),
     }),
     {
       name: 'gridbot-storage',
       partialize: (state) => ({
         token: state.token,
         walletAddress: state.walletAddress,
-        isAuthenticated: state.isAuthenticated
+        isAuthenticated: state.isAuthenticated,
+        orderSequence: state.orderSequence,
       })
     }
   )

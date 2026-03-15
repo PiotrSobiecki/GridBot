@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { X, Wallet, Edit2, Save, Plus, Trash2, RefreshCw } from "lucide-react";
+import { X, Wallet, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
 import { useStore } from "../store/useStore";
 import { api } from "../api";
@@ -76,11 +76,9 @@ function CurrencyIconWithFallback({
 export default function WalletPanel({ onClose }: WalletPanelProps) {
   const { userSettings, setUserSettings, walletAddress, prices } =
     useWalletStore();
-  const [isEditing, setIsEditing] = useState(false);
   const [localWallet, setLocalWallet] = useState<WalletBalance[]>(
     userSettings?.wallet || [],
   );
-  const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleRefresh = async () => {
@@ -138,44 +136,6 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletAddress]);
 
-  const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      await api.updateWallet(localWallet);
-
-      if (userSettings) {
-        setUserSettings({ ...userSettings, wallet: localWallet });
-      }
-
-      setIsEditing(false);
-      toast.success("Zapisano portfel");
-    } catch (error: any) {
-      toast.error(error.message || "Błąd zapisywania");
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const updateBalance = (
-    index: number,
-    field: keyof WalletBalance,
-    value: string | number,
-  ) => {
-    const newWallet = [...localWallet];
-    newWallet[index] = { ...newWallet[index], [field]: value };
-    setLocalWallet(newWallet);
-  };
-
-  const addCurrency = () => {
-    setLocalWallet([
-      ...localWallet,
-      { currency: "NEW", balance: 0, reserved: 0 },
-    ]);
-  };
-
-  const removeCurrency = (index: number) => {
-    setLocalWallet(localWallet.filter((_, i) => i !== index));
-  };
 
   // Precyzja wyświetlania sald: BTC/ETH mają małe ilości (wiele zer po przecinku)
   const formatBalance = (currency: string, balance: number): string => {
@@ -242,15 +202,19 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
       maximumFractionDigits: 2,
     });
 
-  // Do wyświetlania: gdy NIE edytujemy, sortuj waluty malejąco po wartości w USD.
-  // W trybie edycji zostaw oryginalną kolejność (żeby indeksy się zgadzały).
-  const displayWallet = isEditing
-    ? localWallet
-    : [...localWallet].sort((a, b) => {
-        const va = getUsdValue(a.currency, a.balance ?? 0) ?? 0;
-        const vb = getUsdValue(b.currency, b.balance ?? 0) ?? 0;
-        return vb - va;
-      });
+  // Sortuj waluty malejąco po wartości w USD
+  const MIN_USD_DISPLAY = 0.1;
+
+  const displayWallet = [...localWallet]
+    .filter((item) => {
+      const usd = getUsdValue(item.currency, item.balance ?? 0) ?? 0;
+      return usd >= MIN_USD_DISPLAY;
+    })
+    .sort((a, b) => {
+      const va = getUsdValue(a.currency, a.balance ?? 0) ?? 0;
+      const vb = getUsdValue(b.currency, b.balance ?? 0) ?? 0;
+      return vb - va;
+    });
 
   return (
     <motion.div
@@ -266,34 +230,16 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
           <h3 className="font-semibold">Portfel</h3>
         </div>
         <div className="flex items-center gap-2">
-          {!isEditing && (
-            <button
-              onClick={handleRefresh}
-              disabled={isRefreshing}
-              className="p-2 rounded-lg hover:bg-grid-bg text-gray-400 hover:text-emerald-400 transition-colors"
-              title="Odśwież z giełdy"
-            >
-              <RefreshCw
-                className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`}
-              />
-            </button>
-          )}
-          {isEditing ? (
-            <button
-              onClick={handleSave}
-              disabled={isSaving}
-              className="p-2 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30"
-            >
-              <Save className="w-4 h-4" />
-            </button>
-          ) : (
-            <button
-              onClick={() => setIsEditing(true)}
-              className="p-2 rounded-lg hover:bg-grid-bg text-gray-400 hover:text-white"
-            >
-              <Edit2 className="w-4 h-4" />
-            </button>
-          )}
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="p-2 rounded-lg hover:bg-grid-bg text-gray-400 hover:text-emerald-400 transition-colors"
+            title="Odśwież z giełdy"
+          >
+            <RefreshCw
+              className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`}
+            />
+          </button>
           <button
             onClick={onClose}
             className="p-2 rounded-lg hover:bg-grid-bg text-gray-400 hover:text-white"
@@ -319,41 +265,9 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
         {displayWallet.map((item, index) => (
           <div
             key={index}
-            className={`flex items-center justify-between p-3 rounded-lg ${
-              isEditing ? "bg-grid-bg/50" : ""
-            }`}
+            className="flex items-center justify-between p-3 rounded-lg"
           >
-            {isEditing ? (
-              <>
-                <input
-                  type="text"
-                  value={item.currency}
-                  onChange={(e) =>
-                    updateBalance(
-                      index,
-                      "currency",
-                      e.target.value.toUpperCase(),
-                    )
-                  }
-                  className="w-20 px-2 py-1 bg-grid-bg border border-grid-border rounded text-sm font-medium"
-                />
-                <input
-                  type="number"
-                  step="any"
-                  value={item.balance}
-                  onChange={(e) =>
-                    updateBalance(index, "balance", Number(e.target.value))
-                  }
-                  className="w-32 px-2 py-1 bg-grid-bg border border-grid-border rounded text-sm font-mono text-right"
-                />
-                <button
-                  onClick={() => removeCurrency(index)}
-                  className="p-1 text-gray-500 hover:text-red-400"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </>
-            ) : (
+            <>
               <>
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full overflow-hidden bg-grid-bg border border-grid-border flex items-center justify-center">
@@ -405,19 +319,9 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
                   </div>
                 </div>
               </>
-            )}
+            </>
           </div>
         ))}
-
-        {isEditing && (
-          <button
-            onClick={addCurrency}
-            className="w-full py-2 border border-dashed border-grid-border rounded-lg text-sm text-gray-500 hover:text-emerald-400 hover:border-emerald-500/50 transition-colors flex items-center justify-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            Dodaj walutę
-          </button>
-        )}
       </div>
 
       {/* Info */}
