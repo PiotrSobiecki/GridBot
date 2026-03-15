@@ -65,6 +65,9 @@ export default function OrderSettings({
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showDeleteFinalConfirm, setShowDeleteFinalConfirm] = useState(false);
+  // Globalne krypto BingX pobierane z kluczy ENV (pasek + priorytet w store)
+  const BINGX_GLOBAL_BASES = ["BTC", "ETH", "BNB", "SOL", "XRP", "DOGE"];
+
   // Lista dostępnych krypto BASE / QUOTE – domyślnie kilka sensownych par,
   // ale docelowo ładowana z backendu (exchangeInfo).
   const [baseAssets, setBaseAssets] = useState<string[]>([
@@ -75,6 +78,8 @@ export default function OrderSettings({
   ]);
   // Na Aster spot jako stable obsługujemy głównie USDT
   const [quoteAssets, setQuoteAssets] = useState<string[]>(["USDT"]);
+  // Flaga: czy lista symboli już załadowana z API (nie resetujemy baseAsset przed załadowaniem)
+  const [symbolsLoaded, setSymbolsLoaded] = useState(false);
 
   // Synchronizuj localOrder z prop order (np. przy przełączeniu zakładki)
   useEffect(() => {
@@ -135,11 +140,16 @@ export default function OrderSettings({
     localOrder.buy?.currency,
   ]);
 
-  // Ładuj listę par z backendu (exchangeInfo) – fallback do domyślnej listy przy błędzie.
-  // Odśwież także przy zmianie giełdy w ustawieniach użytkownika.
+  // Ładuj listę par z backendu – dla BingX WSZYSTKIE pary USDT, dla AsterDex standardowa lista.
+  // Odśwież przy zmianie giełdy.
   useEffect(() => {
-    api
-      .getAsterSymbols()
+    // Priorytet: exchange z zlecenia → exchange z ustawień usera → domyślnie asterdex
+    const orderExchange = (order as any)?.exchange || (localOrder as any)?.exchange;
+    const exchange = orderExchange || userSettings?.exchange || "asterdex";
+    const fetch = exchange === "bingx" ? api.getBingxSymbols() : api.getAsterSymbols();
+
+    setSymbolsLoaded(false);
+    fetch
       .then((data) => {
         if (Array.isArray(data.baseAssets) && data.baseAssets.length > 0) {
           setBaseAssets(data.baseAssets);
@@ -147,16 +157,19 @@ export default function OrderSettings({
         if (Array.isArray(data.quoteAssets) && data.quoteAssets.length > 0) {
           setQuoteAssets(data.quoteAssets);
         }
+        setSymbolsLoaded(true);
       })
       .catch((err: any) => {
         console.error("Failed to load symbols:", err);
         toast.error("Nie udało się pobrać listy par z giełdy");
+        setSymbolsLoaded(true); // pozwól działać dalej nawet przy błędzie
       });
-  }, [userSettings?.exchange]);
+  }, [userSettings?.exchange, (order as any)?.exchange, (localOrder as any)?.exchange]);
 
   // Jeśli po zmianie giełdy aktualny baseAsset nie jest już na liście dostępnych,
-  // ustaw pierwszy dostępny (żeby nie zostawał symbol z poprzedniej giełdy).
+  // ustaw pierwszy dostępny – ALE tylko po załadowaniu symboli z API (nie przy domyślnej liście).
   useEffect(() => {
+    if (!symbolsLoaded) return; // poczekaj na odpowiedź z API
     if (!localOrder || baseAssets.length === 0) return;
     if (!localOrder.baseAsset) return;
 
@@ -171,7 +184,7 @@ export default function OrderSettings({
           : prev,
       );
     }
-  }, [userSettings?.exchange, baseAssets]);
+  }, [symbolsLoaded, userSettings?.exchange, baseAssets]);
 
   const toggleSection = (section: Section) => {
     const newSections = new Set(expandedSections);
@@ -554,26 +567,47 @@ export default function OrderSettings({
                   const quoteAsset =
                     localOrder.quoteAsset || localOrder.buy?.currency || "USDT";
                   const symbol = `${v}${quoteAsset}`;
+                  const exchange =
+                    (localOrder as any)?.exchange ||
+                    userSettings?.exchange ||
+                    "asterdex";
 
                   // Spróbuj pobrać cenę ze store
                   let currentPrice = prices[symbol]?.price || 0;
+                  let rawPrice: string | number | null = null;
 
-                  // Jeśli cena nie jest w store, spróbuj pobrać z API
+                  // Jeśli cena nie jest w store, pobierz z odpowiedniego API
                   if (!currentPrice && walletAddress) {
                     try {
-                      const priceData = await api.getPrices();
-                      const priceInfo = priceData[symbol];
-                      if (priceInfo) {
-                        currentPrice =
-                          typeof priceInfo === "object" &&
-                          priceInfo !== null &&
-                          "price" in priceInfo
-                            ? typeof priceInfo.price === "string"
+                      if (
+                        exchange === "bingx" &&
+                        !BINGX_GLOBAL_BASES.includes(v.toUpperCase())
+                      ) {
+                        // Symbol spoza globalnej listy → klucze usera
+                        const priceInfo = await api.getBingxPrice(symbol);
+                        if (priceInfo?.price != null) {
+                          rawPrice = priceInfo.price;
+                          currentPrice =
+                            typeof priceInfo.price === "string"
                               ? parseFloat(priceInfo.price)
-                              : Number(priceInfo.price)
-                            : typeof priceInfo === "string"
-                              ? parseFloat(priceInfo)
-                              : Number(priceInfo);
+                              : Number(priceInfo.price);
+                        }
+                      } else {
+                        // Symbol globalny lub AsterDex → standardowe API
+                        const priceData = await api.getPrices();
+                        const priceInfo = priceData[symbol];
+                        if (priceInfo) {
+                          rawPrice =
+                            typeof priceInfo === "object" &&
+                            priceInfo !== null &&
+                            "price" in priceInfo
+                              ? priceInfo.price
+                              : priceInfo;
+                          currentPrice =
+                            typeof rawPrice === "string"
+                              ? parseFloat(rawPrice)
+                              : Number(rawPrice);
+                        }
                       }
                     } catch (e) {
                       console.warn(`Failed to fetch price for ${symbol}:`, e);
@@ -609,24 +643,41 @@ export default function OrderSettings({
                   const baseAsset =
                     localOrder.baseAsset || localOrder.sell?.currency || "BTC";
                   const symbol = `${baseAsset}${v}`;
+                  const exchange =
+                    (localOrder as any)?.exchange ||
+                    userSettings?.exchange ||
+                    "asterdex";
 
                   let currentPrice = prices[symbol]?.price || 0;
 
                   if (!currentPrice && walletAddress) {
                     try {
-                      const priceData = await api.getPrices();
-                      const priceInfo = priceData[symbol];
-                      if (priceInfo) {
-                        currentPrice =
-                          typeof priceInfo === "object" &&
-                          priceInfo !== null &&
-                          "price" in priceInfo
-                            ? typeof priceInfo.price === "string"
+                      if (
+                        exchange === "bingx" &&
+                        !BINGX_GLOBAL_BASES.includes(baseAsset.toUpperCase())
+                      ) {
+                        const priceInfo = await api.getBingxPrice(symbol);
+                        if (priceInfo?.price != null) {
+                          currentPrice =
+                            typeof priceInfo.price === "string"
                               ? parseFloat(priceInfo.price)
-                              : Number(priceInfo.price)
-                            : typeof priceInfo === "string"
-                              ? parseFloat(priceInfo)
-                              : Number(priceInfo);
+                              : Number(priceInfo.price);
+                        }
+                      } else {
+                        const priceData = await api.getPrices();
+                        const priceInfo = priceData[symbol];
+                        if (priceInfo) {
+                          currentPrice =
+                            typeof priceInfo === "object" &&
+                            priceInfo !== null &&
+                            "price" in priceInfo
+                              ? typeof priceInfo.price === "string"
+                                ? parseFloat(priceInfo.price)
+                                : Number(priceInfo.price)
+                              : typeof priceInfo === "string"
+                                ? parseFloat(priceInfo)
+                                : Number(priceInfo);
+                        }
                       }
                     } catch (e) {
                       console.warn(`Failed to fetch price for ${symbol}:`, e);
@@ -636,7 +687,6 @@ export default function OrderSettings({
                   setLocalOrder((prev) => {
                     const updated = { ...prev } as any;
                     updated.quoteAsset = v;
-                    // Aktualizuj focusPrice do aktualnej ceny wybranej pary
                     if (currentPrice > 0) {
                       updated.focusPrice = currentPrice;
                     }

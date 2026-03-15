@@ -396,23 +396,11 @@ router.get("/aster/symbols", authMiddleware, async (req, res) => {
       const base = s.baseAsset;
       const quote = s.quoteAsset;
 
-      // Dla BingX bierzemy tylko pary kończące się na USDT
+      // Dla BingX bierzemy tylko pary kończące się na USDT – tylko globalne (pasek górny)
       if (isBingx) {
         if (quote === "USDT") {
-          // I tylko wybrane bazowe: BTC, ETH, BNB, SOL, XRP, TRX, DOGE, ASTER, LINK, MED, LUNC
-          const allowedBasesBingx = [
-            "BTC",
-            "ETH",
-            "BNB",
-            "SOL",
-            "XRP",
-            "TRX",
-            "DOGE",
-            "ASTER",
-            "LINK",
-            "MED",
-            "LUNC",
-          ];
+          // Pasek górny: tylko 6 globalnych krypto pobieranych z kluczy ENV
+          const allowedBasesBingx = ["BTC", "ETH", "BNB", "SOL", "XRP", "DOGE"];
           const upperBase = (base || "").toUpperCase();
           if (upperBase && allowedBasesBingx.includes(upperBase)) {
             baseAssetsSet.add(upperBase);
@@ -464,6 +452,71 @@ router.post("/prices/:symbol", authMiddleware, (req, res) => {
 
   PriceFeedService.setPrice(symbol, price);
   res.json({ success: true });
+});
+
+/**
+ * Zwraca WSZYSTKIE dostępne pary USDT z BingX Spot – do wyboru w zleceniu.
+ * Nie filtrujemy listy – user może tradować dowolną kryptowalutę.
+ * Nie wymaga BingX jako aktywnej giełdy – lista par jest publiczna.
+ */
+router.get("/bingx/symbols", authMiddleware, async (req, res) => {
+  try {
+    // fetchExchangeInfo bez walletAddress – lista par jest publiczna, nie wymaga kluczy
+    const info = await BingXService.fetchExchangeInfo();
+    const symbols = Array.isArray(info.symbols) ? info.symbols : [];
+
+    const baseAssetsSet = new Set();
+    symbols.forEach((s) => {
+      if (s.quoteAsset && s.quoteAsset.toUpperCase() === "USDT" && s.baseAsset) {
+        baseAssetsSet.add(s.baseAsset.toUpperCase());
+      }
+    });
+
+    res.json({
+      symbols,
+      baseAssets: Array.from(baseAssetsSet).sort(),
+      quoteAssets: ["USDT"],
+    });
+  } catch (error) {
+    console.error("Error fetching BingX symbols:", error.message);
+    res.status(500).json({ error: "Failed to fetch BingX symbols" });
+  }
+});
+
+/**
+ * Pobiera cenę pojedynczego symbolu z BingX z kluczami API usera.
+ * Używane gdy symbol nie należy do globalnej listy (BTC/ETH/BNB/SOL/XRP/DOGE).
+ */
+router.get("/bingx/price/:symbol", authMiddleware, async (req, res) => {
+  try {
+    const walletAddress = req.walletAddress;
+    const exchange = await getExchangeForWallet(walletAddress);
+    if (exchange !== "bingx") {
+      return res.status(400).json({ error: "Current exchange is not BingX" });
+    }
+
+    const rawSymbol = req.params.symbol.toUpperCase();
+    const bingxSymbol = rawSymbol.includes("-")
+      ? rawSymbol
+      : rawSymbol.replace(/USDT$/, "-USDT");
+
+    const ticker = await BingXService.fetch24hrTicker(bingxSymbol, walletAddress);
+    const normalizedSymbol = (ticker.symbol || bingxSymbol).replace("-", "");
+    console.log(
+      `👤 BingX USER price: ${normalizedSymbol}=${ticker.lastPrice} | wallet=${walletAddress}`,
+    );
+    res.json({
+      symbol: normalizedSymbol,
+      price: ticker.lastPrice,
+      priceChangePercent:
+        ticker.priceChangePercent != null
+          ? parseFloat(ticker.priceChangePercent)
+          : null,
+    });
+  } catch (error) {
+    console.error("Error fetching BingX price:", error.message);
+    res.status(500).json({ error: "Failed to fetch BingX price" });
+  }
 });
 
 /**

@@ -205,6 +205,22 @@ class ApiClient {
     return this.request(TRADING_API, "/api/trading/aster/symbols");
   }
 
+  async getBingxSymbols(): Promise<{
+    symbols: any[];
+    baseAssets: string[];
+    quoteAssets: string[];
+  }> {
+    return this.request(TRADING_API, "/api/trading/bingx/symbols");
+  }
+
+  async getBingxPrice(symbol: string): Promise<{
+    symbol: string;
+    price: string | number;
+    priceChangePercent: number | null;
+  }> {
+    return this.request(TRADING_API, `/api/trading/bingx/price/${symbol}`);
+  }
+
   async setPrice(symbol: string, price: number): Promise<void> {
     await this.request(TRADING_API, `/api/trading/prices/${symbol}`, {
       method: "POST",

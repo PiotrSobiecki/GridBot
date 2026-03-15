@@ -1,8 +1,12 @@
 import { motion } from "framer-motion";
+import { useEffect } from "react";
 import { Activity, Pause } from "lucide-react";
 import toast from "react-hot-toast";
 import { useStore } from "../store/useStore";
+import { api } from "../api";
 import type { OrderSettings, GridState } from "../types";
+
+const BINGX_GLOBAL_BASES = ["BTC", "ETH", "BNB", "SOL", "XRP", "DOGE"];
 
 interface OrderTabsProps {
   orders: OrderSettings[];
@@ -17,10 +21,38 @@ export default function OrderTabs({
   onSelect,
   gridStates,
 }: OrderTabsProps) {
-  const { positions, prices } = useStore((state) => ({
+  const { positions, prices, updatePrice } = useStore((state) => ({
     positions: state.positions,
     prices: state.prices,
+    updatePrice: state.updatePrice,
   }));
+
+  // Dla każdego zlecenia BingX z niestandardowym krypto (spoza globalnej listy)
+  // pobierz cenę z kluczy usera jeśli nie ma jej jeszcze w store.
+  useEffect(() => {
+    const bingxOrders = orders.filter(
+      (o) => (o as any).exchange === "bingx",
+    );
+    bingxOrders.forEach(async (order) => {
+      const base = order.baseAsset || (order as any).sell?.currency || "BTC";
+      const quote = order.quoteAsset || (order as any).buy?.currency || "USDT";
+      const symbol = `${base}${quote}`;
+      if (BINGX_GLOBAL_BASES.includes(base.toUpperCase())) return;
+      if (prices[symbol]?.price) return;
+      try {
+        const info = await api.getBingxPrice(symbol);
+        if (info?.price != null) {
+          const num =
+            typeof info.price === "string"
+              ? parseFloat(info.price)
+              : Number(info.price);
+          (updatePrice as any)(symbol, num, info.priceChangePercent ?? null, info.price);
+        }
+      } catch {
+        // cicho – cena pojawi się przy następnym odświeżeniu
+      }
+    });
+  }, [orders, prices]);
 
   if (orders.length === 0) {
     return (

@@ -20,29 +20,20 @@ export default function PriceDisplay() {
     intervals.length > 0 ? Math.min(...intervals) : 5;
   const refreshIntervalMs = refreshIntervalSec * 1000;
 
-  // Lista krypto do wyświetlenia na pasku – domyślnie kilka popularnych,
-  // ale docelowo ładowana z backendu (exchangeInfo).
-  const [baseAssets, setBaseAssets] = useState<string[]>([
-    "ASTER",
-    "BTC",
-    "ETH",
-    "BNB",
-  ]);
+  // BingX: 6 globalnych krypto na pasku (klucze ENV), AsterDex: własna lista
+  const BINGX_GLOBAL_BAR = ["BTC", "ETH", "BNB", "SOL", "XRP", "DOGE"];
 
-  // Pobierz listę dostępnych BASE/QUOTE z backendu (exchangeInfo),
-  // i odśwież ją także przy zmianie giełdy w ustawieniach użytkownika.
+  const [baseAssets, setBaseAssets] = useState<string[]>(
+    userSettings?.exchange === "bingx" ? BINGX_GLOBAL_BAR : ["ASTER", "BTC", "ETH", "BNB"],
+  );
+
+  // Pobierz listę dostępnych BASE/QUOTE z backendu i odśwież przy zmianie giełdy.
   useEffect(() => {
     api
       .getAsterSymbols()
       .then((data: any) => {
         if (Array.isArray(data.baseAssets) && data.baseAssets.length > 0) {
-          // Na pasku nie pokazujemy MED ani LUNC – dostępne tylko do tradingu w zleceniach.
-          const hiddenFromBar = ["MED", "LUNC"];
-          setBaseAssets(
-            data.baseAssets.filter(
-              (asset: string) => !hiddenFromBar.includes(asset.toUpperCase()),
-            ),
-          );
+          setBaseAssets(data.baseAssets);
         }
       })
       .catch((err) => {

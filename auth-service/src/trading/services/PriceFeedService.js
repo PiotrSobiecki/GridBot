@@ -332,6 +332,29 @@ export function setPrice(symbol, price) {
 }
 
 /**
+ * Ustawia cenę dla konkretnej giełdy i globalnie (używane przez scheduler przy cenach user-specific)
+ */
+export function setPriceForExchange(symbol, price, exchange) {
+  const sym = symbol.toUpperCase();
+  const priceDec = price instanceof Decimal ? price : new Decimal(price);
+  const now = Date.now();
+
+  if (!currentPricesByExchange.has(exchange)) {
+    currentPricesByExchange.set(exchange, new Map());
+    priceChangesByExchange.set(exchange, new Map());
+    lastUpdateTimeByExchange.set(exchange, new Map());
+  }
+  currentPricesByExchange.get(exchange).set(sym, priceDec);
+  lastUpdateTimeByExchange.get(exchange).set(sym, now);
+
+  // aktualizuj też globalny cache dla kompatybilności
+  currentPrices.set(sym, priceDec);
+  lastUpdateTime.set(sym, now);
+
+  broadcastPrice(sym, priceDec);
+}
+
+/**
  * Zamyka połączenia
  */
 export function cleanup() {
@@ -348,6 +371,7 @@ export default {
   getAllPrices,
   isPriceStale,
   setPrice,
+  setPriceForExchange,
   refreshFromAster,
   cleanup,
   stopSimulation,

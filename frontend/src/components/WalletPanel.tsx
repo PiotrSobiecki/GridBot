@@ -28,7 +28,7 @@ const getCurrencyIconUrl = (symbol: string): string | null => {
     case "USDT":
       return "https://cryptologos.cc/logos/tether-usdt-logo.svg?v=032";
     case "BNB":
-      return "https://cryptologos.cc/logos/bnb-bnb-logo.svg?v=032";
+      return "https://static-app.bb-os.com/icon/BNB.png";
     case "XRP":
       return "https://cryptologos.cc/logos/xrp-xrp-logo.svg?v=032";
     case "SOL":
@@ -38,7 +38,7 @@ const getCurrencyIconUrl = (symbol: string): string | null => {
     case "MED":
       return "https://static-app.bb-os.com/icon/MED.png";
     case "LUNC":
-      return "https://cryptologos.cc/logos/terra-luna-lunc-logo.svg?v=032";
+      return "https://static-app.bb-os.com/icon/LUNC.png";
     case "USDC":
       return "https://cryptologos.cc/logos/usd-coin-usdc-logo.svg?v=032";
 
@@ -79,7 +79,8 @@ function CurrencyIconWithFallback({
 }
 
 export default function WalletPanel({ onClose }: WalletPanelProps) {
-  const { userSettings, setUserSettings, walletAddress, prices } = useWalletStore();
+  const { userSettings, setUserSettings, walletAddress, prices } =
+    useWalletStore();
   const [isEditing, setIsEditing] = useState(false);
   const [localWallet, setLocalWallet] = useState<WalletBalance[]>(
     userSettings?.wallet || [],

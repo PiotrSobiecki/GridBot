@@ -462,12 +462,12 @@ export async function fetchSpotTickerPrice(symbol) {
  * @returns {Promise<{symbol: string, lastPrice: string, priceChangePercent: string|null}>}
  */
 export async function fetch24hrTicker(symbol, walletAddress = null) {
+  // Jeśli podano walletAddress → użyj kluczy usera (dla niestandardowych krypto).
+  // Dla globalnych krypto (pasek górny) walletAddress = null → klucze z ENV.
   const result = await httpRequest("/openApi/spot/v1/ticker/24hr", {
     method: "GET",
     signed: true,
-    // Ceny 24h są globalne – używamy zawsze globalnych kluczy z .env,
-    // niezależnie od konkretnego walleta (walletAddress nie jest tu potrzebny).
-    walletAddress: null,
+    walletAddress: walletAddress || null,
     query: { symbol },
   });
 
@@ -497,19 +497,10 @@ export async function fetch24hrTicker(symbol, walletAddress = null) {
 // BingX używa formatu "BTC-USDT" (z myślnikiem), nie "BTCUSDT"
 // Domyślna lista symboli, jeśli exchangeInfo jest niedostępne
 // (ograniczona do kilku głównych krypto, tak jak w UI)
-const DEFAULT_TICKER_SYMBOLS = [
-  "BTC-USDT",
-  "ETH-USDT",
-  "BNB-USDT",
-  "SOL-USDT",
-  "XRP-USDT",
-  "TRX-USDT",
-  "DOGE-USDT",
-  "ASTER-USDT",
-  "LINK-USDT",
-  "MED-USDT",
-  "LUNC-USDT",
-];
+// Globalne krypto pobierane z kluczy ENV na pasek górny
+const BINGX_GLOBAL_BASES = ["BTC", "ETH", "BNB", "SOL", "XRP", "DOGE"];
+
+const DEFAULT_TICKER_SYMBOLS = BINGX_GLOBAL_BASES.map((b) => `${b}-USDT`);
 
 // Cache listy symboli, żeby nie pytać exchangeInfo przy każdym odświeżeniu cen
 let cachedTickerSymbols = null;
@@ -534,23 +525,9 @@ async function getTickerSymbols() {
       (s) => s.quoteAsset && s.quoteAsset.toUpperCase() === "USDT",
     );
 
-    // Ograniczamy się tylko do wybranych krypto:
-    // BTC, ETH, BNB, SOL, XRP, TRON (TRX), DOGE, ASTER, LINK, MED, LUNC
-    const allowedBases = [
-      "BTC",
-      "ETH",
-      "BNB",
-      "SOL",
-      "XRP",
-      "TRX",
-      "DOGE",
-      "ASTER",
-      "LINK",
-      "MED",
-      "LUNC",
-    ];
+    // Ticker globalny (pasek górny) – tylko 6 globalnych krypto z kluczy ENV
     const filtered = usdtPairs.filter((s) =>
-      allowedBases.includes((s.baseAsset || "").toUpperCase()),
+      BINGX_GLOBAL_BASES.includes((s.baseAsset || "").toUpperCase()),
     );
 
     if (filtered.length === 0) {

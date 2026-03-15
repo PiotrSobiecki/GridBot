@@ -233,12 +233,47 @@ async function processOrder(state, ordersById) {
   const quoteAsset = settings.quoteAsset || settings.buy?.currency || "USDT";
   const symbol = `${baseAsset}${quoteAsset}`;
 
-  const currentPrice = await PriceFeedService.getPrice(symbol, currentWallet);
+  const BINGX_GLOBAL_BASES = ["BTC", "ETH", "BNB", "SOL", "XRP", "DOGE"];
+  const orderExchange = settings.exchange || "asterdex";
+  const isNonGlobalBingx =
+    orderExchange === "bingx" && !BINGX_GLOBAL_BASES.includes(baseAsset.toUpperCase());
+
+  let currentPrice;
+
+  if (isNonGlobalBingx) {
+    // Dla nie-globalnych BingX zawsze pobieraj świeżą cenę z kluczy usera
+    try {
+      const bingxSymbol = symbol.replace("USDT", "-USDT");
+      const ticker = await BingXService.fetch24hrTicker(bingxSymbol, currentWallet);
+      if (ticker?.lastPrice && parseFloat(ticker.lastPrice) > 0) {
+        currentPrice = new Decimal(ticker.lastPrice);
+        PriceFeedService.setPriceForExchange(symbol, currentPrice, "bingx");
+        console.log(
+          `👤 Scheduler: ${symbol}=${currentPrice.toNumber()} (user API) | order=${state.orderId} | wallet=${currentWallet}`,
+        );
+      } else {
+        currentPrice = new Decimal(0);
+      }
+    } catch (e) {
+      console.warn(
+        `⚠️ Scheduler: nie udało się pobrać ceny ${symbol} z kluczy usera: ${e.message}`,
+      );
+      currentPrice = new Decimal(0);
+    }
+  } else {
+    currentPrice = await PriceFeedService.getPrice(symbol, currentWallet);
+  }
 
   if (currentPrice.eq(0)) {
-    // Logi wyłączone - brak ceny jest normalny gdy nie ma kluczy API
+    console.warn(
+      `⚠️ Scheduler: brak ceny dla ${symbol} | order=${state.orderId} | wallet=${currentWallet} – pomijam tick`,
+    );
     return;
   }
+
+  console.log(
+    `📈 Scheduler tick: ${symbol}=${currentPrice.toNumber()} | order=${state.orderId} | wallet=${currentWallet}`,
+  );
 
   // Przetwórz cenę (teraz async) - użyj aktualnego portfela
   await GridAlgorithmService.processPrice(
