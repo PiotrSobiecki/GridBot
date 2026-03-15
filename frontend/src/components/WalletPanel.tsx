@@ -18,7 +18,7 @@ interface WalletPanelProps {
   onClose: () => void;
 }
 
-const getCurrencyIconUrl = (symbol: string): string | null => {
+const getCurrencyIconUrl = (symbol: string): string => {
   const s = symbol.toUpperCase();
   switch (s) {
     case "BTC":
@@ -27,23 +27,18 @@ const getCurrencyIconUrl = (symbol: string): string | null => {
       return "https://cryptologos.cc/logos/ethereum-eth-logo.svg?v=032";
     case "USDT":
       return "https://cryptologos.cc/logos/tether-usdt-logo.svg?v=032";
-    case "BNB":
-      return "https://static-app.bb-os.com/icon/BNB.png";
     case "XRP":
       return "https://cryptologos.cc/logos/xrp-xrp-logo.svg?v=032";
     case "SOL":
       return "https://cryptologos.cc/logos/solana-sol-logo.svg?v=032";
-    case "ASTER":
-      return "https://assets.coingecko.com/coins/images/69040/standard/_ASTER.png?1757326782";
-    case "MED":
-      return "https://static-app.bb-os.com/icon/MED.png";
-    case "LUNC":
-      return "https://static-app.bb-os.com/icon/LUNC.png";
     case "USDC":
       return "https://cryptologos.cc/logos/usd-coin-usdc-logo.svg?v=032";
-
+    case "ASTER":
+      return "https://assets.coingecko.com/coins/images/69040/standard/_ASTER.png?1757326782";
     default:
-      return null;
+      // Dla wszystkich pozostałych krypto (BingX i inne) pobierz ikonę z bb-os.com
+      // CurrencyIconWithFallback obsłuży błąd (pokaże litery) jeśli ikona nie istnieje
+      return `https://static-app.bb-os.com/icon/${s}.png`;
   }
 };
 
@@ -363,10 +358,7 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full overflow-hidden bg-grid-bg border border-grid-border flex items-center justify-center">
                     {(() => {
-                      const iconUrl = getCurrencyIconUrl(item.currency);
                       const cur = item.currency.toUpperCase();
-                      const baseClass =
-                        "w-full h-full flex items-center justify-center text-xs font-bold";
                       const cls =
                         cur === "BTC"
                           ? "bg-orange-500/20 text-orange-400"
@@ -383,21 +375,13 @@ export default function WalletPanel({ onClose }: WalletPanelProps) {
                                     : cur === "ASTER"
                                       ? "bg-emerald-500/20 text-emerald-300"
                                       : "bg-gray-500/20 text-gray-400";
-                      const fallback = (
-                        <div className={`${baseClass} ${cls}`}>
-                          {cur.slice(0, 3)}
-                        </div>
+                      return (
+                        <CurrencyIconWithFallback
+                          iconUrl={getCurrencyIconUrl(cur)}
+                          currency={cur}
+                          fallbackClass={cls}
+                        />
                       );
-                      if (iconUrl) {
-                        return (
-                          <CurrencyIconWithFallback
-                            iconUrl={iconUrl}
-                            currency={cur}
-                            fallbackClass={cls}
-                          />
-                        );
-                      }
-                      return fallback;
                     })()}
                   </div>
                   <div>
