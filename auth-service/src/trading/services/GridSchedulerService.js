@@ -235,15 +235,25 @@ async function processOrder(state, ordersById) {
 
   const BINGX_GLOBAL_BASES = ["BTC", "ETH", "BNB", "SOL", "XRP", "DOGE"];
   const orderExchange = settings.exchange || "asterdex";
-  const isNonGlobalBingx =
-    orderExchange === "bingx" && !BINGX_GLOBAL_BASES.includes(baseAsset.toUpperCase());
+  const isGlobalBingxSymbol =
+    orderExchange === "bingx" &&
+    BINGX_GLOBAL_BASES.includes(baseAsset.toUpperCase()) &&
+    quoteAsset.toUpperCase() === "USDT";
+  const isNonGlobalBingx = orderExchange === "bingx" && !isGlobalBingxSymbol;
 
   let currentPrice;
 
   if (isNonGlobalBingx) {
     // Dla nie-globalnych BingX zawsze pobieraj świeżą cenę z kluczy usera
     try {
-      const bingxSymbol = symbol.replace("USDT", "-USDT");
+      // Konwertuj symbol do formatu BingX (np. ETHBTC → ETH-BTC, DEGOUSDT → DEGO-USDT)
+      const KNOWN_QUOTES = ["USDT", "USDC", "BTC", "ETH", "BNB", "BUSD", "FDUSD"];
+      const knownQuote = KNOWN_QUOTES.find(
+        (q) => symbol.length > q.length && symbol.endsWith(q),
+      );
+      const bingxSymbol = knownQuote
+        ? `${symbol.slice(0, symbol.length - knownQuote.length)}-${knownQuote}`
+        : symbol;
       const ticker = await BingXService.fetch24hrTicker(bingxSymbol, currentWallet);
       if (ticker?.lastPrice && parseFloat(ticker.lastPrice) > 0) {
         currentPrice = new Decimal(ticker.lastPrice);

@@ -237,6 +237,10 @@ export async function fetchExchangeInfo() {
   const rawSymbols =
     result?.data?.symbols ?? (Array.isArray(result?.data) ? result.data : null);
   if (rawSymbols && Array.isArray(rawSymbols)) {
+    // Znormalizuj listę symboli tak, żeby baseAsset / quoteAsset były zawsze ustawione,
+    // również dla par innych niż USDT (np. ETHUSDC, ETHBTC).
+    const QUOTE_SUFFIXES = ["USDT", "USDC", "BTC", "ETH", "BUSD", "FDUSD"];
+
     return {
       symbols: rawSymbols.map((s) => {
         const symbol = typeof s === "object" && s !== null ? s : {};
@@ -245,10 +249,25 @@ export async function fetchExchangeInfo() {
             ? "TRADING"
             : "BREAK";
         const symStr = (symbol.symbol || "").replace(/-/g, "");
-        const base =
-          symbol.baseAsset || (symStr ? symStr.replace(/USDT$/i, "") : "");
-        const quote =
-          symbol.quoteAsset || (symStr && /USDT$/i.test(symStr) ? "USDT" : "");
+
+        let base = (symbol.baseAsset || "").toUpperCase();
+        let quote = (symbol.quoteAsset || "").toUpperCase();
+
+        // Jeśli API nie podało jawnie base/quote, spróbuj rozciąć po znanym sufiksie (USDT, USDC, BTC, ETH...)
+        if (!base || !quote) {
+          const upper = symStr.toUpperCase();
+          const foundSuffix = QUOTE_SUFFIXES.find(
+            (q) => upper.length > q.length && upper.endsWith(q),
+          );
+          if (foundSuffix) {
+            quote = quote || foundSuffix;
+            base = base || upper.slice(0, upper.length - foundSuffix.length);
+          } else if (!base && upper) {
+            // Fallback: jeśli dalej nic nie wiemy, potraktuj cały symbol jako base (quote puste)
+            base = upper;
+          }
+        }
+
         return {
           symbol: symStr,
           baseAsset: base,
@@ -492,6 +511,42 @@ export async function fetch24hrTicker(symbol, walletAddress = null) {
     JSON.stringify(result, null, 2),
   );
   throw new Error(`Invalid response for ${symbol}`);
+}
+
+/**
+ * Pobiera WSZYSTKIE aktywne tickery SPOT bez podawania symbolu (pełna lista rynku).
+ * Używane do filtrowania handlowalnych par – tylko te, które mają aktywny ticker.
+ * walletAddress = klucze usera (lista par per-user, nie z ENV).
+ * @param {string|null} walletAddress
+ * @returns {Promise<Set<string>>} – set znormalizowanych symboli (np. "ETHUSDT", "BTCUSDT")
+ */
+/**
+ * @returns {{ symbols: Set<string>, ok: boolean }}
+ *   ok=false gdy nie udało się pobrać (brak kluczy / błąd sieci)
+ *   ok=true gdy poprawna odpowiedź (symbols może być duże Set)
+ */
+export async function fetchActiveSpotSymbols(walletAddress = null) {
+  try {
+    const result = await httpRequest("/openApi/spot/v1/ticker/24hr", {
+      method: "GET",
+      signed: true,
+      walletAddress: walletAddress || null,
+      query: {}, // bez symbolu = wszystkie pary naraz
+    });
+    const data = result?.data;
+    if (!Array.isArray(data)) return { symbols: new Set(), ok: false };
+    const symbols = new Set();
+    data.forEach((t) => {
+      if (!t.symbol) return;
+      // BingX zwraca "BTC-USDT" – normalizujemy do "BTCUSDT"
+      const normalized = String(t.symbol).replace(/-/g, "").toUpperCase();
+      symbols.add(normalized);
+    });
+    return { symbols, ok: true };
+  } catch (e) {
+    console.warn("⚠️ BingXService.fetchActiveSpotSymbols failed:", e.message);
+    return { symbols: new Set(), ok: false };
+  }
 }
 
 // BingX używa formatu "BTC-USDT" (z myślnikiem), nie "BTCUSDT"

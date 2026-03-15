@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Play,
@@ -47,14 +47,14 @@ export default function OrderSettings({
     userSettings,
     setGridState,
     prices,
-    gridStates,
+    updatePrice,
   } = useStore((state) => ({
     walletAddress: state.walletAddress,
     setUserSettings: state.setUserSettings,
     userSettings: state.userSettings,
     setGridState: state.setGridState,
     prices: state.prices,
-    gridStates: state.gridStates,
+    updatePrice: state.updatePrice,
   }));
   const [localOrder, setLocalOrder] = useState(order);
   const [expandedSections, setExpandedSections] = useState<Set<Section>>(
@@ -68,16 +68,30 @@ export default function OrderSettings({
   // Globalne krypto BingX pobierane z kluczy ENV (pasek + priorytet w store)
   const BINGX_GLOBAL_BASES = ["BTC", "ETH", "BNB", "SOL", "XRP", "DOGE"];
 
-  // Lista dostępnych krypto BASE / QUOTE – domyślnie kilka sensownych par,
-  // ale docelowo ładowana z backendu (exchangeInfo).
-  const [baseAssets, setBaseAssets] = useState<string[]>([
-    "BTC",
-    "ETH",
-    "BNB",
-    "ASTER",
-  ]);
-  // Na Aster spot jako stable obsługujemy głównie USDT
-  const [quoteAssets, setQuoteAssets] = useState<string[]>(["USDT"]);
+  // Domyślna lista głównych krypto (Waluta1) – rozszerzona; docelowo nadpisywana z API.
+  const DEFAULT_BASE_ASSETS = [
+    // Główne krypto – bez USDT (tylko Waluta2). USDC zostawiamy, bo ma parę do USDT.
+    "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "AVAX", "LINK", "DOT",
+    "MATIC", "UNI", "ATOM", "LTC", "ETC", "BCH", "NEAR", "APT", "OP", "ARB",
+    "ASTER", "TRX", "SHIB", "PEPE", "WBTC", "USDC", "FIL", "INJ", "SUI", "SEI",
+  ];
+  const [baseAssets, setBaseAssets] = useState<string[]>(DEFAULT_BASE_ASSETS);
+
+  // Domyślna lista walut kwotowanych (Waluta2) – USDT, USDC, BTC, ETH itd.
+  const DEFAULT_QUOTE_ASSETS = ["USDT", "USDC", "BTC", "ETH", "BNB", "BUSD", "FDUSD"];
+
+  // Pełna mapa par: base → lista dostępnych quote (domyślnie sensowne pary dla głównych krypto).
+  const [pairsMap, setPairsMap] = useState<Record<string, string[]>>(() => {
+    const map: Record<string, string[]> = {};
+    const quotes = DEFAULT_QUOTE_ASSETS;
+    DEFAULT_BASE_ASSETS.forEach((base) => {
+      map[base] = [...quotes.filter((q) => q !== base)];
+    });
+    map.ASTER = ["USDT"];
+    return map;
+  });
+
+  const [quoteAssets, setQuoteAssets] = useState<string[]>(DEFAULT_QUOTE_ASSETS);
   // Flaga: czy lista symboli już załadowana z API (nie resetujemy baseAsset przed załadowaniem)
   const [symbolsLoaded, setSymbolsLoaded] = useState(false);
 
@@ -157,6 +171,19 @@ export default function OrderSettings({
         if (Array.isArray(data.quoteAssets) && data.quoteAssets.length > 0) {
           setQuoteAssets(data.quoteAssets);
         }
+        // Mapa BASE → lista QUOTE (tylko pary faktycznie na giełdzie; bez odwracania).
+        // Np. BTC → [USDT, USDC]; ETH → [USDT, USDC, BTC]. Para ETH/BTC istnieje, BTC/ETH – nie.
+        if (Array.isArray(data.symbols) && data.symbols.length > 0) {
+          const map: Record<string, string[]> = {};
+          data.symbols.forEach((s: any) => {
+            const base = (s.baseAsset || "").toUpperCase();
+            const quote = (s.quoteAsset || "").toUpperCase();
+            if (!base || !quote) return;
+            if (!map[base]) map[base] = [];
+            if (!map[base].includes(quote)) map[base].push(quote);
+          });
+          setPairsMap(map);
+        }
         setSymbolsLoaded(true);
       })
       .catch((err: any) => {
@@ -166,13 +193,28 @@ export default function OrderSettings({
       });
   }, [userSettings?.exchange, (order as any)?.exchange, (localOrder as any)?.exchange]);
 
-  // Jeśli po zmianie giełdy aktualny baseAsset nie jest już na liście dostępnych,
-  // ustaw pierwszy dostępny – ALE tylko po załadowaniu symboli z API (nie przy domyślnej liście).
+  // Jeśli po ZMIANIE GIEŁDY aktualny baseAsset nie pasuje do nowej giełdy – resetuj.
+  // Nie resetuj przy zwykłym ładowaniu lub gdy symbol to ręcznie wpisany tekst (combobox).
+  // Warunek: baseAssets załadowane (symbolsLoaded), exchange z settings != exchange z zlecenia.
   useEffect(() => {
-    if (!symbolsLoaded) return; // poczekaj na odpowiedź z API
+    if (!symbolsLoaded) return;
     if (!localOrder || baseAssets.length === 0) return;
     if (!localOrder.baseAsset) return;
 
+    // Pobierz giełdę z ustawień (ta, dla której załadowano baseAssets)
+    const settingsExchange = userSettings?.exchange || "asterdex";
+    const orderExchange = (localOrder as any)?.exchange || (order as any)?.exchange;
+
+    // Resetuj tylko gdy giełdy są różne (np. przejście z BingX → AsterDex)
+    // lub gdy baseAsset pochodzi z poprzedniej giełdy i nie istnieje na nowej
+    const isExchangeSwitch = orderExchange && orderExchange !== settingsExchange;
+    if (!isExchangeSwitch && baseAssets.includes(localOrder.baseAsset)) return;
+    if (!isExchangeSwitch && !baseAssets.includes(localOrder.baseAsset)) {
+      // Symbol nie na liście, ale giełda ta sama – user mógł wpisać ręcznie, zostaw
+      return;
+    }
+
+    // Giełda się zmieniła i symbol nie pasuje → reset do pierwszego z nowej listy
     if (!baseAssets.includes(localOrder.baseAsset)) {
       setLocalOrder((prev) =>
         prev
@@ -185,6 +227,56 @@ export default function OrderSettings({
       );
     }
   }, [symbolsLoaded, userSettings?.exchange, baseAssets]);
+
+  // Gdy Waluta1 (base) się zmienia – upewnij się, że Waluta2 (quote) jest w dopuszczalnych parach z giełdy.
+  // Np. dla BTC dozwolone tylko USDT, USDC; jeśli było ETH → ustaw na USDT.
+  useEffect(() => {
+    const base = (localOrder.baseAsset || localOrder.sell?.currency || "").toUpperCase();
+    const quote = (localOrder.quoteAsset || localOrder.buy?.currency || "USDT").toUpperCase();
+    if (!base) return;
+    const allowedQuotes = pairsMap[base];
+    if (!allowedQuotes || allowedQuotes.length === 0) return;
+    if (allowedQuotes.includes(quote)) return;
+    const fallback = allowedQuotes[0];
+    setLocalOrder((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        quoteAsset: fallback,
+        buy: prev.buy ? { ...prev.buy, currency: fallback } : { currency: fallback, walletProtection: 0, mode: "walletLimit", maxValue: 0, addProfit: false },
+      };
+    });
+  }, [localOrder.baseAsset, pairsMap]);
+
+  // Dla BingX: gdy wyświetlana para (np. ETH/BTC) nie ma ceny w store – pobierz z API
+  useEffect(() => {
+    const exchange = (localOrder as any)?.exchange || userSettings?.exchange || "asterdex";
+    if (exchange !== "bingx" || !walletAddress) return;
+    const base = (localOrder.baseAsset || localOrder.sell?.currency || "").toUpperCase();
+    const quote = (localOrder.quoteAsset || localOrder.buy?.currency || "USDT").toUpperCase();
+    if (!base || !quote) return;
+    const symbol = `${base}${quote}`;
+    if (prices[symbol]?.price) return;
+    api
+      .getBingxPrice(symbol)
+      .then((info) => {
+        if (info?.price != null) {
+          const num = typeof info.price === "string" ? parseFloat(info.price) : Number(info.price);
+          if (!isNaN(num) && num > 0) {
+            (updatePrice as any)(symbol, num, info.priceChangePercent ?? null, info.price);
+          }
+        }
+      })
+      .catch(() => {});
+  }, [
+    (localOrder as any)?.exchange,
+    userSettings?.exchange,
+    localOrder.baseAsset,
+    localOrder.quoteAsset,
+    localOrder.sell?.currency,
+    localOrder.buy?.currency,
+    walletAddress,
+  ]);
 
   const toggleSection = (section: Section) => {
     const newSections = new Set(expandedSections);
@@ -555,15 +647,11 @@ export default function OrderSettings({
 
             {/* Para handlowa */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
-              <SelectField
-                label="6. Krypto (BASE)"
-                value={
-                  localOrder.baseAsset || localOrder.sell?.currency || "BTC"
-                }
-                options={baseAssets}
+              <AssetCombobox
+                label="6. Waluta1 (BASE)"
+                value={localOrder.baseAsset || localOrder.sell?.currency || "BTC"}
+                assets={baseAssets}
                 onChange={async (v) => {
-                  // Ustaw baseAsset i sell.currency jednocześnie
-                  // Pobierz aktualną cenę dla nowego krypto
                   const quoteAsset =
                     localOrder.quoteAsset || localOrder.buy?.currency || "USDT";
                   const symbol = `${v}${quoteAsset}`;
@@ -572,18 +660,15 @@ export default function OrderSettings({
                     userSettings?.exchange ||
                     "asterdex";
 
-                  // Spróbuj pobrać cenę ze store
                   let currentPrice = prices[symbol]?.price || 0;
                   let rawPrice: string | number | null = null;
 
-                  // Jeśli cena nie jest w store, pobierz z odpowiedniego API
                   if (!currentPrice && walletAddress) {
                     try {
                       if (
                         exchange === "bingx" &&
                         !BINGX_GLOBAL_BASES.includes(v.toUpperCase())
                       ) {
-                        // Symbol spoza globalnej listy → klucze usera
                         const priceInfo = await api.getBingxPrice(symbol);
                         if (priceInfo?.price != null) {
                           rawPrice = priceInfo.price;
@@ -593,7 +678,6 @@ export default function OrderSettings({
                               : Number(priceInfo.price);
                         }
                       } else {
-                        // Symbol globalny lub AsterDex → standardowe API
                         const priceData = await api.getPrices();
                         const priceInfo = priceData[symbol];
                         if (priceInfo) {
@@ -614,12 +698,14 @@ export default function OrderSettings({
                     }
                   }
 
+                  if (currentPrice > 0) {
+                    (updatePrice as any)(symbol, currentPrice, null, rawPrice ?? currentPrice);
+                  }
+
                   setLocalOrder((prev) => {
                     const updated = { ...prev } as any;
                     updated.baseAsset = v;
-                    if (currentPrice > 0) {
-                      updated.focusPrice = currentPrice;
-                    }
+                    if (currentPrice > 0) updated.focusPrice = currentPrice;
                     if (updated.sell) {
                       updated.sell = { ...updated.sell, currency: v };
                     } else {
@@ -635,10 +721,17 @@ export default function OrderSettings({
                   });
                 }}
               />
-              <SelectField
-                label="7. Stable (QUOTE)"
-                value={localOrder.quoteAsset || localOrder.buy.currency}
-                options={quoteAssets}
+              <AssetCombobox
+                label="7. Waluta2 (QUOTE)"
+                value={localOrder.quoteAsset || localOrder.buy?.currency || "USDT"}
+                assets={(() => {
+                  const base = (localOrder.baseAsset || localOrder.sell?.currency || "").toUpperCase();
+                  // Tylko pary z giełdy: dla BTC tylko USDT, USDC; dla ETH tylko USDT, USDC, BTC (nie odwrotnie).
+                  if (base && pairsMap[base] && pairsMap[base].length > 0) {
+                    return pairsMap[base];
+                  }
+                  return quoteAssets.length > 0 ? quoteAssets : DEFAULT_QUOTE_ASSETS;
+                })()}
                 onChange={async (v) => {
                   const baseAsset =
                     localOrder.baseAsset || localOrder.sell?.currency || "BTC";
@@ -649,6 +742,7 @@ export default function OrderSettings({
                     "asterdex";
 
                   let currentPrice = prices[symbol]?.price || 0;
+                  let rawPrice: string | number | null = null;
 
                   if (!currentPrice && walletAddress) {
                     try {
@@ -658,6 +752,7 @@ export default function OrderSettings({
                       ) {
                         const priceInfo = await api.getBingxPrice(symbol);
                         if (priceInfo?.price != null) {
+                          rawPrice = priceInfo.price;
                           currentPrice =
                             typeof priceInfo.price === "string"
                               ? parseFloat(priceInfo.price)
@@ -667,16 +762,16 @@ export default function OrderSettings({
                         const priceData = await api.getPrices();
                         const priceInfo = priceData[symbol];
                         if (priceInfo) {
-                          currentPrice =
+                          rawPrice =
                             typeof priceInfo === "object" &&
                             priceInfo !== null &&
                             "price" in priceInfo
-                              ? typeof priceInfo.price === "string"
-                                ? parseFloat(priceInfo.price)
-                                : Number(priceInfo.price)
-                              : typeof priceInfo === "string"
-                                ? parseFloat(priceInfo)
-                                : Number(priceInfo);
+                              ? priceInfo.price
+                              : priceInfo;
+                          currentPrice =
+                            typeof rawPrice === "string"
+                              ? parseFloat(rawPrice)
+                              : Number(rawPrice);
                         }
                       }
                     } catch (e) {
@@ -684,12 +779,14 @@ export default function OrderSettings({
                     }
                   }
 
+                  if (currentPrice > 0) {
+                    (updatePrice as any)(symbol, currentPrice, null, rawPrice ?? currentPrice);
+                  }
+
                   setLocalOrder((prev) => {
                     const updated = { ...prev } as any;
                     updated.quoteAsset = v;
-                    if (currentPrice > 0) {
-                      updated.focusPrice = currentPrice;
-                    }
+                    if (currentPrice > 0) updated.focusPrice = currentPrice;
                     if (updated.buy) {
                       updated.buy = { ...updated.buy, currency: v };
                     } else {
@@ -1649,6 +1746,163 @@ function InputField({
       </div>
       {hint && (
         <div className="text-[10px] sm:text-xs text-gray-600 mt-1">{hint}</div>
+      )}
+    </div>
+  );
+}
+
+// Popularne krypto pokazywane na górze listy (bez dodatkowych zapytań o wolumen)
+const POPULAR_ASSETS = [
+  "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "USDT", "USDC",
+  "ADA", "TRX", "AVAX", "LINK", "DOT", "MATIC", "UNI", "ATOM",
+  "LTC", "ETC", "BCH", "NEAR", "APT", "OP", "ARB", "MKR",
+];
+
+/**
+ * Combobox do wyboru waluty – input z filtrowaniem i listą podpowiedzi.
+ * Popularne waluty na górze, reszta alfabetycznie.
+ * Obsługuje ręczne wpisanie dowolnego symbolu.
+ */
+function AssetCombobox({
+  label,
+  value,
+  assets,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  assets: string[];
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  const [inputVal, setInputVal] = useState(value);
+  const [open, setOpen] = useState(false);
+  const [listFilter, setListFilter] = useState(""); // filtr listy – przy otwarciu pusty, żeby widać całą listę
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Sync gdy wartość z zewnątrz się zmienia (np. reset przy zmianie giełdy)
+  useEffect(() => {
+    setInputVal(value);
+  }, [value]);
+
+  // Przy otwarciu dropdownu pokazuj od razu pełną listę (nie filtruj po bieżącej wartości)
+  const handleFocus = () => {
+    setOpen(true);
+    setListFilter("");
+  };
+
+  // Zamknij dropdown przy kliknięciu poza komponentem
+  useEffect(() => {
+    function handleOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        const trimmed = inputVal.trim().toUpperCase();
+        if (trimmed && trimmed !== value.toUpperCase()) {
+          setInputVal(trimmed);
+          onChange(trimmed);
+        }
+      }
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [inputVal, value, onChange]);
+
+  // Do filtrowania listy używamy listFilter (przy otwarciu "" = pełna lista), nie inputVal
+  const filter = listFilter.trim().toUpperCase();
+
+  // Buduj posortowaną listę: popularne na górze, potem reszta alfabetycznie
+  const sortedAssets = useCallback(() => {
+    const popular = POPULAR_ASSETS.filter((a) => assets.includes(a));
+    const rest = assets.filter((a) => !POPULAR_ASSETS.includes(a)).sort();
+    return [...popular, ...rest];
+  }, [assets])();
+
+  const filtered = filter
+    ? sortedAssets.filter((a) => a.startsWith(filter))
+    : sortedAssets;
+
+  const handleSelect = (asset: string) => {
+    setInputVal(asset);
+    setOpen(false);
+    onChange(asset);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const trimmed = inputVal.trim().toUpperCase();
+      if (trimmed) {
+        // Jeśli jest dokładnie jedno dopasowanie – wybierz je
+        if (filtered.length === 1) {
+          handleSelect(filtered[0]);
+        } else {
+          // Pozwól na ręczne wpisanie
+          setOpen(false);
+          onChange(trimmed);
+        }
+      }
+    } else if (e.key === "Escape") {
+      setOpen(false);
+      setInputVal(value);
+      setListFilter("");
+    } else if (e.key === "ArrowDown" && filtered.length > 0) {
+      e.preventDefault();
+      handleSelect(filtered[0]);
+    }
+  };
+
+  return (
+    <div ref={containerRef} className="relative">
+      <label className="block text-xs text-gray-500 mb-1">{label}</label>
+      <input
+        type="text"
+        value={inputVal}
+        placeholder={placeholder || "Wpisz lub wybierz..."}
+        onFocus={handleFocus}
+        onChange={(e) => {
+          const next = e.target.value.toUpperCase();
+          setInputVal(next);
+          setListFilter(next);
+          setOpen(true);
+        }}
+        onKeyDown={handleKeyDown}
+        className="w-full px-3 py-2 bg-grid-bg border border-grid-border rounded-lg text-sm focus:outline-none focus:border-emerald-500 uppercase"
+        autoComplete="off"
+        spellCheck={false}
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 mt-1 w-full max-h-56 overflow-y-auto bg-[#1a1f2e] border border-grid-border rounded-lg shadow-xl">
+          {filtered.map((asset, idx) => {
+            const isPopular = POPULAR_ASSETS.includes(asset);
+            // Separator między popularymi a resztą
+            const showDivider =
+              idx > 0 &&
+              isPopular === false &&
+              POPULAR_ASSETS.includes(filtered[idx - 1]);
+            return (
+              <div key={asset}>
+                {showDivider && (
+                  <div className="border-t border-grid-border my-1" />
+                )}
+                <div
+                  onMouseDown={(e) => {
+                    e.preventDefault(); // zapobiega stracie focusu przed onMouseDown
+                    handleSelect(asset);
+                  }}
+                  className={`px-3 py-1.5 text-sm cursor-pointer hover:bg-emerald-500/10 hover:text-emerald-400 transition-colors ${
+                    asset === value ? "text-emerald-400 bg-emerald-500/5" : "text-gray-200"
+                  }`}
+                >
+                  {asset}
+                  {isPopular && (
+                    <span className="ml-1 text-[10px] text-gray-500">★</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );

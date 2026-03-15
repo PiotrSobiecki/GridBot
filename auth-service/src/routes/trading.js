@@ -455,33 +455,84 @@ router.post("/prices/:symbol", authMiddleware, (req, res) => {
 });
 
 /**
- * Zwraca WSZYSTKIE dostępne pary USDT z BingX Spot – do wyboru w zleceniu.
- * Nie filtrujemy listy – user może tradować dowolną kryptowalutę.
- * Nie wymaga BingX jako aktywnej giełdy – lista par jest publiczna.
+ * Zwraca listę par SPOT BingX dostępnych dla danego usera.
+ * - common/symbols (publiczne) przecięte z /ticker/24hr (z kluczami usera)
+ *   → tylko faktycznie handlowalne pary które widzi dany user.
+ * - Lista symboli z kluczy usera (nie globalnych ENV).
  */
 router.get("/bingx/symbols", authMiddleware, async (req, res) => {
   try {
-    // fetchExchangeInfo bez walletAddress – lista par jest publiczna, nie wymaga kluczy
+    const walletAddress = req.walletAddress;
+
+    // Pobierz listę par z exchangeInfo (publiczne, bez kluczy)
     const info = await BingXService.fetchExchangeInfo();
-    const symbols = Array.isArray(info.symbols) ? info.symbols : [];
+    const allSymbols = Array.isArray(info.symbols) ? info.symbols : [];
+
+    // Pobierz zestaw aktywnych tickerów z kluczami usera (ticker/24hr bez symbolu = wszystkie pary)
+    const { symbols: activeSymbols, ok: tickerOk } = await BingXService.fetchActiveSpotSymbols(walletAddress);
+
+    const QUOTE_SUFFIXES = ["USDT", "USDC", "EUR", "GBP", "TRY", "BRL", "UAH"];
+    const STABLE_ONLY_QUOTE = new Set(["USDT", "BUSD", "FDUSD", "DAI"]);
+
+    // Przecięcie: common/symbols ∩ ticker/24hr
+    // Jeśli ticker nie zwrócił danych (ok=false: brak kluczy / błąd) – brak filtracji po tickerze,
+    // ale stosujemy filtry jakościowe (status TRADING, brak zlepków)
+    const tradeable = allSymbols.filter((s) => {
+      const symStr = (s.symbol || "").toUpperCase();
+      if (tickerOk) {
+        return activeSymbols.has(symStr);
+      }
+      // Fallback bez kluczy: filtruj po status TRADING
+      return s.status === "TRADING";
+    });
 
     const baseAssetsSet = new Set();
-    symbols.forEach((s) => {
-      if (s.quoteAsset && s.quoteAsset.toUpperCase() === "USDT" && s.baseAsset) {
-        baseAssetsSet.add(s.baseAsset.toUpperCase());
+    const quoteAssetsSet = new Set();
+    const symbolsOut = [];
+
+    tradeable.forEach((s) => {
+      const base = (s.baseAsset || "").toUpperCase();
+      const quote = (s.quoteAsset || "").toUpperCase();
+      if (!base || !quote) return;
+
+      symbolsOut.push(s);
+
+      if (quote) quoteAssetsSet.add(quote);
+
+      // base: wyklucz "zlepki" (BTCUSDC) i stable-only-quote (USDT/BUSD itd.)
+      const looksLikePair = QUOTE_SUFFIXES.some(
+        (q) => base !== q && base.endsWith(q),
+      );
+      if (!looksLikePair && !STABLE_ONLY_QUOTE.has(base)) {
+        baseAssetsSet.add(base);
       }
     });
 
     res.json({
-      symbols,
+      symbols: symbolsOut,
       baseAssets: Array.from(baseAssetsSet).sort(),
-      quoteAssets: ["USDT"],
+      quoteAssets: Array.from(quoteAssetsSet).sort(),
     });
   } catch (error) {
     console.error("Error fetching BingX symbols:", error.message);
     res.status(500).json({ error: "Failed to fetch BingX symbols" });
   }
 });
+
+/**
+ * Zamienia symbol łączony (np. ETHBTC, ETHUSDC) na format BingX (ETH-BTC, ETH-USDC).
+ */
+function toBingxSymbolFormat(rawSymbol) {
+  const s = rawSymbol.toUpperCase();
+  if (s.includes("-")) return s;
+  const quoteSuffixes = ["USDT", "USDC", "BUSD", "FDUSD", "BTC", "ETH", "BNB"];
+  for (const q of quoteSuffixes) {
+    if (s.length > q.length && s.endsWith(q)) {
+      return s.slice(0, s.length - q.length) + "-" + q;
+    }
+  }
+  return s;
+}
 
 /**
  * Pobiera cenę pojedynczego symbolu z BingX z kluczami API usera.
@@ -496,9 +547,7 @@ router.get("/bingx/price/:symbol", authMiddleware, async (req, res) => {
     }
 
     const rawSymbol = req.params.symbol.toUpperCase();
-    const bingxSymbol = rawSymbol.includes("-")
-      ? rawSymbol
-      : rawSymbol.replace(/USDT$/, "-USDT");
+    const bingxSymbol = toBingxSymbolFormat(rawSymbol);
 
     const ticker = await BingXService.fetch24hrTicker(bingxSymbol, walletAddress);
     const normalizedSymbol = (ticker.symbol || bingxSymbol).replace("-", "");

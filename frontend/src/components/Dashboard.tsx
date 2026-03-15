@@ -312,9 +312,11 @@ export default function Dashboard() {
       .map((item: any) => (item.currency || "").toUpperCase());
 
     // Dodaj base assets ze zleceń BingX (np. DEGO może nie być w portfelu)
-    const orderCurrencies = orders
-      .filter((o) => (o as any).exchange === "bingx")
-      .map((o) => (o.baseAsset || (o as any).sell?.currency || "").toUpperCase());
+    const bingxOrders = orders.filter((o) => (o as any).exchange === "bingx");
+
+    const orderCurrencies = bingxOrders.map((o) =>
+      (o.baseAsset || (o as any).sell?.currency || "").toUpperCase(),
+    );
 
     const nonGlobalCurrencies = [...new Set([...walletCurrencies, ...orderCurrencies])]
       .filter(
@@ -325,29 +327,61 @@ export default function Dashboard() {
           !BINGX_GLOBAL_BASES.includes(cur),
       );
 
-    if (nonGlobalCurrencies.length === 0) return;
-
     const fetchWalletPrices = async () => {
-      for (const currency of nonGlobalCurrencies) {
-        const symbol = `${currency}USDT`;
-        try {
-          const info = await api.getBingxPrice(symbol);
-          if (info?.price != null) {
-            const num =
-              typeof info.price === "string"
-                ? parseFloat(info.price)
-                : Number(info.price);
-            if (!isNaN(num) && num > 0) {
-              (updatePrice as any)(
-                symbol,
-                num,
-                info.priceChangePercent ?? null,
-                info.price,
-              );
+      // 1) Ceny dla nie-globalnych krypto z portfela / zleceń do USDT
+      if (nonGlobalCurrencies.length > 0) {
+        for (const currency of nonGlobalCurrencies) {
+          const symbol = `${currency}USDT`;
+          try {
+            const info = await api.getBingxPrice(symbol);
+            if (info?.price != null) {
+              const num =
+                typeof info.price === "string"
+                  ? parseFloat(info.price)
+                  : Number(info.price);
+              if (!isNaN(num) && num > 0) {
+                (updatePrice as any)(
+                  symbol,
+                  num,
+                  info.priceChangePercent ?? null,
+                  info.price,
+                );
+              }
             }
+          } catch {
+            // cicho – np. krypto nie ma pary USDT na BingX
           }
-        } catch {
-          // cicho – np. krypto nie ma pary USDT na BingX
+        }
+      }
+
+      // 2) Ceny dla faktycznych par z aktywnych zleceń BingX (np. ETHBTC, ETHUSDC)
+      if (bingxOrders.length > 0) {
+        for (const order of bingxOrders) {
+          const base =
+            order.baseAsset || (order as any).sell?.currency || "BTC";
+          const quote =
+            order.quoteAsset || (order as any).buy?.currency || "USDT";
+          const symbol = `${base}${quote}`;
+
+          try {
+            const info = await api.getBingxPrice(symbol);
+            if (info?.price != null) {
+              const num =
+                typeof info.price === "string"
+                  ? parseFloat(info.price)
+                  : Number(info.price);
+              if (!isNaN(num) && num > 0) {
+                (updatePrice as any)(
+                  symbol,
+                  num,
+                  info.priceChangePercent ?? null,
+                  info.price,
+                );
+              }
+            }
+          } catch {
+            // cicho – np. chwilowy błąd ceny
+          }
         }
       }
     };
